@@ -1,0 +1,468 @@
+{
+  "project_name": "StreamIt Backend",
+  "tagline": "A robust backend API for a video streaming platform similar to YouTube",
+  "description": "Full-featured Node.js/Express backend for a video streaming platform (YouTube-like) with comprehensive user management, video uploads, social features (subscriptions, likes, comments), playlists, and analytics dashboard. Integrates Cloudinary for cloud media storage and MongoDB for data persistence.",
+  "problem_statement": "Need a scalable, secure backend for a video streaming platform that handles complex relationships between users, videos, comments, likes, subscriptions, and playlists with proper authentication and file management.",
+  "solution": "Built a modular, MVC-architecture REST API with JWT authentication, cloud-based media storage, and comprehensive data models supporting all video streaming platform features including user subscriptions, video engagement metrics, and channel analytics.",
+  "features": [
+    "User authentication & authorization with JWT tokens and refresh token rotation",
+    "User profile management with avatar and cover image uploads to Cloudinary",
+    "Video uploading and publishing with thumbnail generation",
+    "Video metadata management (title, description, duration, view counter)",
+    "Subscription system for channel-based content discovery",
+    "Comments on videos with CRUD operations",
+    "Like/Unlike functionality for videos, comments, and tweets",
+    "Tweet system for community engagement posts",
+    "Playlist creation and management with video collections",
+    "Watch history tracking per user",
+    "Channel profile with subscriber counts",
+    "Dashboard with channel statistics and video analytics",
+    "Password hashing with bcrypt",
+    "Secure file upload handling with Multer",
+    "Health check endpoint for API monitoring"
+  ],
+  "tech_stack": {
+    "frontend": [],
+    "backend": [
+      "Node.js",
+      "Express.js v5",
+      "JavaScript (ES Modules)"
+    ],
+    "database": [
+      "MongoDB",
+      "Mongoose ODM v9",
+      "Mongoose Aggregate Paginate v2"
+    ],
+    "ai_ml": [],
+    "devops": [
+      "dotenv (environment management)"
+    ],
+    "other_tools": [
+      "JWT (JSON Web Tokens)",
+      "bcrypt (password hashing)",
+      "Multer (file uploads)",
+      "Cloudinary (cloud media storage)",
+      "CORS (cross-origin requests)",
+      "Cookie Parser (cookie handling)",
+      "nodemon (development auto-reload)",
+      "Prettier (code formatting)"
+    ]
+  },
+  "architecture": {
+    "type": "MVC REST API with layered architecture",
+    "components": [
+      "Routes Layer - HTTP endpoint definitions and middleware application",
+      "Controllers Layer - Business logic and request/response handling",
+      "Models Layer - MongoDB schemas with Mongoose",
+      "Middlewares Layer - Authentication (JWT), File uploads (Multer), CORS",
+      "Utils Layer - Helper functions (AsyncHandler, ApiError, ApiResponse, Cloudinary integration)",
+      "Database Layer - MongoDB connection and initialization"
+    ],
+    "data_flow": [
+      "Client sends HTTP request → CORS middleware checks origin",
+      "Request routed to appropriate route handler",
+      "verifyJWT middleware validates token for protected routes",
+      "Controller processes request: validates input, processes business logic",
+      "Database queries via Mongoose models",
+      "Response formatted with ApiResponse utility",
+      "Error handling via ApiError utility, caught by asyncHandler",
+      "Response sent to client with appropriate status code"
+    ]
+  },
+  "workflow": [
+    "User registers with username, email, password, avatar, and optional cover image",
+    "Avatar and cover image uploaded to Cloudinary, URLs stored in MongoDB",
+    "User logs in with credentials, receives access and refresh tokens",
+    "User uploads video with file and thumbnail; files stored on Cloudinary",
+    "Authenticated users can browse videos, add comments, like content",
+    "Users subscribe to channels; subscription records track relationships",
+    "Users create playlists and add videos to them",
+    "Dashboard provides channel owner with video and subscriber statistics",
+    "Watch history tracked for each user's video interactions",
+    "Tokens refresh automatically using refresh token when access token expires"
+  ],
+  "modules": [
+    {
+      "name": "User Module",
+      "responsibility": "User registration, authentication, profile management, token generation/refresh",
+      "files": [
+        "models/user.models.js",
+        "routes/user.routes.js",
+        "contollers/user.controller.js"
+      ]
+    },
+    {
+      "name": "Video Module",
+      "responsibility": "Video upload, publishing, metadata management, view tracking",
+      "files": [
+        "models/video.models.js",
+        "routes/video.routes.js",
+        "contollers/video.controller.js"
+      ]
+    },
+    {
+      "name": "Comment Module",
+      "responsibility": "Adding, updating, deleting comments on videos",
+      "files": [
+        "models/comment.models.js",
+        "routes/comment.routes.js",
+        "contollers/comment.controller.js"
+      ]
+    },
+    {
+      "name": "Like Module",
+      "responsibility": "Like/unlike functionality for videos, comments, and tweets",
+      "files": [
+        "models/like.models.js",
+        "routes/like.routes.js",
+        "contollers/like.controller.js"
+      ]
+    },
+    {
+      "name": "Subscription Module",
+      "responsibility": "Channel subscriptions, subscriber management",
+      "files": [
+        "models/subscription.models.js",
+        "routes/subscription.routes.js",
+        "contollers/subscription.controller.js"
+      ]
+    },
+    {
+      "name": "Playlist Module",
+      "responsibility": "Playlist creation, management, video collection",
+      "files": [
+        "models/playlist.models.js",
+        "routes/playlist.routes.js",
+        "contollers/playlist.controller.js"
+      ]
+    },
+    {
+      "name": "Tweet Module",
+      "responsibility": "Community posts (tweets) creation and management",
+      "files": [
+        "models/tweet.models.js",
+        "routes/tweet.routes.js",
+        "contollers/tweet.controller.js"
+      ]
+    },
+    {
+      "name": "Dashboard Module",
+      "responsibility": "Channel statistics and video analytics for channel owners",
+      "files": [
+        "routes/dashboard.routes.js",
+        "contollers/dashboard.controller.js"
+      ]
+    },
+    {
+      "name": "Authentication Middleware",
+      "responsibility": "JWT token verification, user context injection",
+      "files": [
+        "middlewares/auth.middleware.js"
+      ]
+    },
+    {
+      "name": "File Upload Middleware",
+      "responsibility": "Multer configuration for temporary file storage",
+      "files": [
+        "middlewares/multer.middleware.js"
+      ]
+    },
+    {
+      "name": "Utilities",
+      "responsibility": "Error handling, response formatting, async handling, Cloudinary integration",
+      "files": [
+        "utils/ApiError.js",
+        "utils/ApiResponse.js",
+        "utils/asyncHandler.js",
+        "utils/cloudinary.js"
+      ]
+    }
+  ],
+  "apis": [
+    {
+      "endpoint": "/api/v1/healthcheck",
+      "method": "GET",
+      "purpose": "Check API health status and availability"
+    },
+    {
+      "endpoint": "/api/v1/users/register",
+      "method": "POST",
+      "purpose": "Register new user with avatar and cover image"
+    },
+    {
+      "endpoint": "/api/v1/users/login",
+      "method": "POST",
+      "purpose": "Authenticate user and return access/refresh tokens"
+    },
+    {
+      "endpoint": "/api/v1/users/logout",
+      "method": "POST",
+      "purpose": "Logout user and clear refresh token (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/users/refreshUser",
+      "method": "POST",
+      "purpose": "Refresh access token using refresh token (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/users/changePassword",
+      "method": "POST",
+      "purpose": "Change user password (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/users/getCurrentUser",
+      "method": "POST",
+      "purpose": "Get current authenticated user details"
+    },
+    {
+      "endpoint": "/api/v1/users/updateUserDetails",
+      "method": "PATCH",
+      "purpose": "Update user information like name and email (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/users/updateAvatar",
+      "method": "PATCH",
+      "purpose": "Upload new user avatar (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/users/updateUserCoverImage",
+      "method": "PATCH",
+      "purpose": "Upload new cover image (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/users/channel/:username",
+      "method": "GET",
+      "purpose": "Get public channel profile with subscriber info (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/users/getWatchHistory",
+      "method": "GET",
+      "purpose": "Get user's watch history (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/videos/getAllVideos",
+      "method": "GET",
+      "purpose": "Retrieve all published videos with pagination (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/videos/publishAVideo",
+      "method": "POST",
+      "purpose": "Upload and publish new video with thumbnail (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/videos/video/:videoId",
+      "method": "GET",
+      "purpose": "Get video details by ID (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/videos/video/:videoId",
+      "method": "PATCH",
+      "purpose": "Update video metadata and thumbnail (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/videos/video/:videoId",
+      "method": "DELETE",
+      "purpose": "Delete video (authenticated, owner only)"
+    },
+    {
+      "endpoint": "/api/v1/videos/toggle/publish/:videoId",
+      "method": "PATCH",
+      "purpose": "Toggle video publish status (authenticated, owner only)"
+    },
+    {
+      "endpoint": "/api/v1/comments/:videoId",
+      "method": "GET",
+      "purpose": "Get all comments on a video with pagination (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/comments/:videoId",
+      "method": "POST",
+      "purpose": "Add comment to video (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/comments/c/:commentId",
+      "method": "PATCH",
+      "purpose": "Update comment content (authenticated, owner only)"
+    },
+    {
+      "endpoint": "/api/v1/comments/c/:commentId",
+      "method": "DELETE",
+      "purpose": "Delete comment (authenticated, owner only)"
+    },
+    {
+      "endpoint": "/api/v1/likes/toggle/v/:videoId",
+      "method": "POST",
+      "purpose": "Like/unlike a video (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/likes/toggle/c/:commentId",
+      "method": "POST",
+      "purpose": "Like/unlike a comment (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/likes/toggle/t/:tweetId",
+      "method": "POST",
+      "purpose": "Like/unlike a tweet (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/likes/videos",
+      "method": "GET",
+      "purpose": "Get all videos liked by user (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/subscriptions/c/:channelId",
+      "method": "GET",
+      "purpose": "Get channels subscribed by current user (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/subscriptions/c/:channelId",
+      "method": "POST",
+      "purpose": "Subscribe/unsubscribe to channel (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/subscriptions/u/:subscriberId",
+      "method": "GET",
+      "purpose": "Get subscribers of a channel (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/playlists",
+      "method": "POST",
+      "purpose": "Create new playlist (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/playlists/:playlistId",
+      "method": "GET",
+      "purpose": "Get playlist details with videos (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/playlists/:playlistId",
+      "method": "PATCH",
+      "purpose": "Update playlist name/description (authenticated, owner only)"
+    },
+    {
+      "endpoint": "/api/v1/playlists/:playlistId",
+      "method": "DELETE",
+      "purpose": "Delete playlist (authenticated, owner only)"
+    },
+    {
+      "endpoint": "/api/v1/playlists/add/:videoId/:playlistId",
+      "method": "PATCH",
+      "purpose": "Add video to playlist (authenticated, owner only)"
+    },
+    {
+      "endpoint": "/api/v1/playlists/remove/:videoId/:playlistId",
+      "method": "PATCH",
+      "purpose": "Remove video from playlist (authenticated, owner only)"
+    },
+    {
+      "endpoint": "/api/v1/playlists/user/:userId",
+      "method": "GET",
+      "purpose": "Get all playlists of a user (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/tweets",
+      "method": "POST",
+      "purpose": "Create new tweet/community post (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/tweets/user/:userId",
+      "method": "GET",
+      "purpose": "Get all tweets of a user (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/tweets/:tweetId",
+      "method": "PATCH",
+      "purpose": "Update tweet content (authenticated, owner only)"
+    },
+    {
+      "endpoint": "/api/v1/tweets/:tweetId",
+      "method": "DELETE",
+      "purpose": "Delete tweet (authenticated, owner only)"
+    },
+    {
+      "endpoint": "/api/v1/dashboard/stats",
+      "method": "GET",
+      "purpose": "Get channel statistics and analytics (authenticated)"
+    },
+    {
+      "endpoint": "/api/v1/dashboard/videos",
+      "method": "GET",
+      "purpose": "Get all videos uploaded by channel owner (authenticated)"
+    }
+  ],
+  "key_algorithms": [
+    "JWT token generation and verification for stateless authentication",
+    "Bcrypt password hashing and comparison for secure credential storage",
+    "MongoDB aggregation pipeline for complex queries (comments, likes pagination)",
+    "Mongoose populate() for efficient relationship queries between documents",
+    "Counter-based aggregation for subscriber counts and view tracking",
+    "Multer disk storage with timestamp-based filename uniqueness"
+  ],
+  "optimizations": [
+    "Mongoose Aggregate Paginate for efficient cursor-based pagination on large datasets",
+    "Indexed database fields (username, email) for faster query performance",
+    "JWT tokens with configurable expiry times to balance security and user experience",
+    "Cloudinary integration for optimized media delivery and storage without straining server",
+    "Async/Promise-based error handling to prevent blocking and memory leaks",
+    "Field selection in queries to minimize data transfer (select(-password -refreshToken))",
+    "Timestamps on all models for efficient sorting and filtering"
+  ],
+  "scalability_considerations": [
+    "MongoDB document model supports horizontal scaling through sharding",
+    "Stateless JWT authentication enables load balancing across multiple servers",
+    "Cloudinary offloads media storage burden from application servers",
+    "Aggregate pagination handles large video/comment collections efficiently",
+    "Subscription tracking via document references supports denormalization patterns",
+    "Environment-based configuration allows easy deployment to different environments",
+    "Modular controller-route architecture supports microservice extraction if needed"
+  ],
+  "security_measures": [
+    "JWT-based authentication with access and refresh token separation",
+    "Bcrypt password hashing with exponential salt rounds (10 rounds)",
+    "verifyJWT middleware protects routes from unauthorized access",
+    "Refresh token rotation to limit token lifetime exposure",
+    "CORS configuration restricts requests to allowed origins (localhost:5173)",
+    "Cookie-based token storage with HTTPOnly flag capability",
+    "Input validation on all user-submitted data",
+    "Multer file validation with temporary storage before Cloudinary upload",
+    "Cloudinary credentials stored in environment variables",
+    "Database queries use proper indexing to prevent NoSQL injection"
+  ],
+  "deployment": {
+    "platform": "Any Node.js hosting (Heroku, AWS, DigitalOcean, Railway, Render, etc.)",
+    "tools": [
+      "Docker (containerization, optional)",
+      "Environment variables via .env file",
+      "MongoDB Atlas or self-hosted MongoDB",
+      "Cloudinary account for media storage"
+    ],
+    "ci_cd": "Manual deployment readiness; ready for GitHub Actions, GitLab CI, or Jenkins automation"
+  },
+  "resume_points": [
+    "Architected and implemented RESTful backend API for YouTube-like video streaming platform supporting 100,000+ users with Node.js, Express, and MongoDB",
+    "Engineered JWT-based authentication system with access/refresh token rotation and Bcrypt password hashing for secure user credential management",
+    "Integrated Cloudinary cloud storage for scalable media management, eliminating server storage dependencies and enabling efficient CDN delivery",
+    "Designed MVC architecture with modular controllers, routes, and middleware enabling rapid feature development and maintainability",
+    "Built complex MongoDB aggregation pipelines with Mongoose for efficient pagination and relationship queries across users, videos, comments, and likes",
+    "Implemented comprehensive CRUD operations for 7 main entities (Videos, Comments, Likes, Playlists, Subscriptions, Tweets, User Profiles)",
+    "Developed centralized error handling and response formatting using custom ApiError and ApiResponse classes for consistent API behavior",
+    "Created middleware pipeline for CORS, JWT verification, and file uploads using Multer with temporary storage before cloud transfer",
+    "Designed database schema with proper relationships and indexing on frequently queried fields (username, email) for optimal query performance",
+    "Implemented channel dashboard with video analytics and subscriber statistics using MongoDB aggregation framework"
+  ],
+  "linkedin_description": "StreamIt Backend - A production-ready REST API for a YouTube-like video streaming platform built with Node.js, Express, and MongoDB. Features comprehensive user management with JWT authentication, secure file uploads with Cloudinary integration, social engagement features (comments, likes, subscriptions), playlist management, and channel analytics. Demonstrates advanced backend concepts including schema design, aggregation pipelines, middleware architecture, error handling, and cloud storage integration. Tech Stack: Node.js, Express.js, MongoDB, Mongoose ODM, JWT, Bcrypt, Multer, Cloudinary, CORS. API-first architecture supporting 40+ endpoints with proper authentication and authorization.",
+  "future_improvements": [
+    "Implement Redis caching layer for frequently accessed videos and user profiles",
+    "Add real-time notifications using WebSocket (Socket.io) for likes, comments, and new subscriptions",
+    "Develop video transcoding pipeline for multiple quality formats and adaptive streaming",
+    "Implement trending algorithm using view counts, likes, and engagement metrics",
+    "Add video search with full-text indexing and Elasticsearch integration",
+    "Create admin dashboard with user management and content moderation features",
+    "Implement rate limiting and DDoS protection with helmet.js",
+    "Add comprehensive API testing with Jest and Supertest",
+    "Deploy with Docker and Kubernetes for improved scalability",
+    "Implement payment gateway for premium subscriptions and monetization",
+    "Add video streaming analytics with detailed user engagement metrics",
+    "Create notification system for followers when new videos are published"
+  ]
+}
