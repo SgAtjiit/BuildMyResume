@@ -5,6 +5,7 @@ import { findUserByFirebaseUid } from "../services/user.service.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { ProjectEntry } from "../classes/profile.classes.js";
 
 const optionalUrlSchema = z
   .string()
@@ -19,7 +20,7 @@ const optionalUrlSchema = z
 const createProjectSchema = z.object({
   title: z.string().trim().min(2, "title must be at least 2 characters"),
   description: z.string().trim().min(10, "description must be at least 10 characters").max(2000),
-  stack: z.string().optional().default(""),
+  stack: z.union([z.string(), z.array(z.string())]).optional().default(""),
   date: z.string().trim().optional().default(""),
   githubUrl: optionalUrlSchema,
   demoUrl: optionalUrlSchema
@@ -46,21 +47,6 @@ const cleanStackItem = (value) => {
   cleaned = cleaned.replace(/\(.*?\)/g, "").trim();
 
   return cleaned;
-};
-
-const splitStack = (rawStack) => {
-  if (!rawStack) {
-    return [];
-  }
-
-  return Array.from(
-    new Set(
-      rawStack
-        .split(",")
-        .map((item) => cleanStackItem(item))
-        .filter(Boolean)
-    )
-  );
 };
 
 const normalizeLine = (line) =>
@@ -187,14 +173,11 @@ export const createProject = asyncHandler(async (req, res) => {
   }
 
   const user = await findUserByFirebaseUid(req.auth.uid);
+  const normalizedProject = ProjectEntry.from(parsed.data);
+
   const project = await Project.create({
     owner: user._id,
-    title: parsed.data.title,
-    description: parsed.data.description,
-    stack: splitStack(parsed.data.stack),
-    date: parsed.data.date,
-    githubUrl: parsed.data.githubUrl,
-    demoUrl: parsed.data.demoUrl,
+    ...normalizedProject.toObject(),
     source: "manual"
   });
 
@@ -210,16 +193,12 @@ export const updateProject = asyncHandler(async (req, res) => {
 
   const user = await findUserByFirebaseUid(req.auth.uid);
   const { projectId } = req.params;
+  const normalizedProject = ProjectEntry.from(parsed.data);
 
   const updated = await Project.findOneAndUpdate(
     { _id: projectId, owner: user._id },
     {
-      title: parsed.data.title,
-      description: parsed.data.description,
-      stack: splitStack(parsed.data.stack),
-      date: parsed.data.date,
-      githubUrl: parsed.data.githubUrl,
-      demoUrl: parsed.data.demoUrl,
+      ...normalizedProject.toObject(),
       source: "manual"
     },
     { new: true }
@@ -239,10 +218,12 @@ export const createProjectFromReadme = asyncHandler(async (req, res) => {
 
   const user = await findUserByFirebaseUid(req.auth.uid);
   const parsedReadme = parseReadme(req.file);
+  const normalizedProject = ProjectEntry.from(parsedReadme);
 
   const project = await Project.create({
     owner: user._id,
-    ...parsedReadme,
+    ...normalizedProject.toObject(),
+    readmeContent: parsedReadme.readmeContent,
     source: "readme",
     readmeOriginalName: req.file.originalname
   });

@@ -131,3 +131,50 @@ export const generateLatexSectionEdit = async ({ latexSource, sectionName, editI
     throw new Error(`Groq request failed: ${providerMessage}`);
   }
 };
+
+export const expandProjectBullet = async ({
+  bullet,
+  projectName = "",
+  technologies = "",
+  atsOptimized = false,
+  maxLines = 2
+}) => {
+  const systemPrompt = [
+    "You are an expert technical resume writer.",
+    "Rewrite one project bullet into a stronger, ATS-friendly bullet while keeping it truthful.",
+    "Return ONLY one bullet line without markdown or explanations.",
+    "Use an action verb, technical depth, and outcome-oriented phrasing.",
+    `Target output that fits within at most ${maxLines} wrapped resume lines.`,
+    `Aim for roughly ${Math.max(12, maxLines * 10)} to ${Math.max(16, maxLines * 14)} words, depending on line budget.`
+  ].join(" ");
+
+  const userPrompt = [
+    `Original bullet: ${bullet}`,
+    `Project name: ${projectName || "N/A"}`,
+    `Technologies: ${technologies || "N/A"}`,
+    `ATS optimized mode: ${atsOptimized ? "ON" : "OFF"}`,
+    `Maximum wrapped lines allowed: ${maxLines}`,
+    "Constraints:",
+    "1) Keep facts grounded in given context; do not fabricate metrics.",
+    "2) If no metrics exist, use qualitative impact wording.",
+    "3) Keep technical nouns relevant to the listed technologies.",
+    "4) Keep phrasing compact enough to fit the line budget.",
+    "5) Output exactly one improved bullet sentence."
+  ].join("\n");
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: env.GROQ_MODEL,
+      temperature: 0.35,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
+    });
+
+    return completion.choices?.[0]?.message?.content?.trim() || "";
+  } catch (error) {
+    const providerMessage = error instanceof Error ? error.message : "Unknown Groq API error";
+    throw new Error(`Groq request failed: ${providerMessage}`);
+  }
+};

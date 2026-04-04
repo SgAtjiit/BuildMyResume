@@ -1,3 +1,3 @@
-# Welcome to your Lovable project
+# Build My Resume
 
 TODO: Document your project here

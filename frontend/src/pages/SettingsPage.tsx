@@ -558,8 +558,8 @@ const SettingsPage = () => {
         <div className="rounded-lg bg-background/50 border border-border/30 p-4">
           <p className="text-xs font-medium text-foreground mb-2">DNS Configuration</p>
           <div className="space-y-1.5 font-mono text-xs text-muted-foreground">
-            <p>A Record: *.johndoe.dev → 185.158.133.1</p>
-            <p>TXT Record: _lovable → lovable_verify=abc123</p>
+            <p>A Record: *.portfolio.dev → 185.158.133.1</p>
+            <p>TXT Record: portfolio verification value</p>
           </div>
         </div>
       </motion.div>

@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Upload, FileText, Eye, Trash2, Download, ChevronUp, Plus } from "lucide-react";
+import { Upload, FileText, Eye, Trash2, Download, ChevronUp, Plus, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/use-auth";
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import JakeResumePreview from "@/components/resume/JakeResumePreview";
+import JakeResumePreview, { type PreviewLayoutConfig } from "@/components/resume/JakeResumePreview";
 import type { Achievement, Education, Experience, Project, ResumeData } from "@/components/resume/ResumeTypes";
 import { getRenderableSkillLines } from "@/components/resume/skillFormat";
 import jsPDF from "jspdf";
@@ -68,6 +68,17 @@ type AchievementRow = {
   bulletText: string;
 };
 
+type LayoutMode = "COMPACT" | "EXHAUSTIVE";
+
+type OptimizedLayout = {
+  layout: LayoutMode;
+  maxProjectBullets: number;
+  skillFormat: "INLINE" | "GRID";
+  fontScaling: number;
+  lineHeight: number;
+  sectionGap: number;
+};
+
 const emptySkillRow = "";
 type SkillSectionRow = {
   title: string;
@@ -81,6 +92,10 @@ const defaultSkillSections = (): SkillSectionRow[] => [
   { title: "Leadership", skills: [emptySkillRow] }
 ];
 
+const ONE_PAGE_LINE_LIMIT = 52;
+const PROJECT_BULLET_WRAP_WIDTH = 526;
+const PROJECT_BULLET_FONT_SIZE = 10;
+
 const parseBullets = (value: string) =>
   value
     .split(/\r?\n/)
@@ -93,6 +108,53 @@ const ensurePdfY = (doc: jsPDF, y: number) => {
     return 36;
   }
   return y;
+};
+
+const estimatePageLines = (data: ResumeData) => {
+  const headingAndContact = 8;
+  const professionalSummaryLines = data.professionalSummary?.trim() ? 3 : 0;
+  const educationLines = (data.education ?? []).length * 4;
+  const experienceLines = (data.experience ?? []).reduce((total, item) => total + 3 + (item.bullets?.length || 0), 0);
+  const projectLines = (data.projects ?? []).reduce((total, item) => total + 2 + (item.bullets?.length || 0), 0);
+  const achievementLines = (data.achievements ?? []).reduce((total, item) => total + 2 + (item.bullets?.length || 0), 0);
+  const skillLines = getRenderableSkillLines(data).length * 1.2;
+  return Math.ceil(
+    headingAndContact +
+    professionalSummaryLines +
+    educationLines +
+    experienceLines +
+    projectLines +
+    achievementLines +
+    skillLines
+  );
+};
+
+const estimatePageFill = (data: ResumeData) => Math.min(1, estimatePageLines(data) / ONE_PAGE_LINE_LIMIT);
+
+const optimizeLayout = (data: ResumeData, options?: { forceExpanded?: boolean; stickyExpanded?: boolean }): OptimizedLayout => {
+  const experienceCount = data.experience?.length ?? 0;
+  const fillRatio = estimatePageFill(data);
+  const shouldExpand = experienceCount === 0 || options?.forceExpanded || (options?.stickyExpanded && fillRatio < 0.9);
+
+  if (!shouldExpand) {
+    return {
+      layout: "COMPACT",
+      maxProjectBullets: 3,
+      skillFormat: "INLINE",
+      fontScaling: 1,
+      lineHeight: 1.16,
+      sectionGap: 14
+    };
+  }
+
+  return {
+    layout: "EXHAUSTIVE",
+    maxProjectBullets: 4,
+    skillFormat: "INLINE",
+    fontScaling: 1,
+    lineHeight: 1.2,
+    sectionGap: 16
+  };
 };
 
 const pdfSerifFontFamily = "NotoSerif";
@@ -171,6 +233,7 @@ const initialResumeData: ResumeData = {
   email: "",
   linkedin: "",
   github: "",
+  professionalSummary: "",
   education: [],
   experience: [],
   projects: [],
@@ -235,18 +298,52 @@ const Resumes = () => {
   const [projectRows, setProjectRows] = useState<ProjectRow[]>([]);
   const [achievementRows, setAchievementRows] = useState<AchievementRow[]>([]);
   const [skillSections, setSkillSections] = useState<SkillSectionRow[]>(defaultSkillSections());
+  const [professionalSummaryInput, setProfessionalSummaryInput] = useState("");
+  const [forceExpandedLayout, setForceExpandedLayout] = useState(false);
+  const [stickyExpandedLayout, setStickyExpandedLayout] = useState(false);
+  const [skippedExperience, setSkippedExperience] = useState(false);
+  const [skippedAchievements, setSkippedAchievements] = useState(false);
+  const [projectAtsMode, setProjectAtsMode] = useState<Record<number, boolean>>({});
+  const [extendingBulletKey, setExtendingBulletKey] = useState<string | null>(null);
+  const [extendingProjectIndex, setExtendingProjectIndex] = useState<number | null>(null);
+
+  const hasExperienceContent = useMemo(
+    () => experienceRows.some((row) => row.role.trim() || row.company.trim() || parseBullets(row.bulletText).length > 0),
+    [experienceRows]
+  );
+
+  const hasAchievementContent = useMemo(
+    () => achievementRows.some((row) => row.title.trim() || parseBullets(row.bulletText).length > 0),
+    [achievementRows]
+  );
+
+  const showProfessionalSummary = !hasExperienceContent && !hasAchievementContent;
+
+  const stepIndexes = useMemo(
+    () => ({
+      professionalSummary: showProfessionalSummary ? 1 : -1,
+      education: showProfessionalSummary ? 2 : 1,
+      experience: showProfessionalSummary ? 3 : 2,
+      achievements: showProfessionalSummary ? 4 : 3,
+      skills: showProfessionalSummary ? 5 : 4,
+      projects: showProfessionalSummary ? 6 : 5,
+      preview: showProfessionalSummary ? 7 : 6
+    }),
+    [showProfessionalSummary]
+  );
 
   const stepTitles = useMemo(
     () => [
       "Basic Contact",
+      ...(showProfessionalSummary ? ["Professional Summary"] : []),
       "Education (Optional)",
       "Experience (Optional)",
-      "Projects (Optional)",
       "Achievements (Optional)",
       "Technical Skills (Optional)",
+      "Projects (Optional)",
       "Preview and Save"
     ],
-    []
+    [showProfessionalSummary]
   );
 
   const fetchResumes = useCallback(async () => {
@@ -397,11 +494,21 @@ const Resumes = () => {
       email: backendUser?.email ?? "",
       linkedin: backendUser?.linkedInUrl ?? "",
       github: backendUser?.githubUrl ?? "",
+      professionalSummary: "",
       education: [],
       experience: [],
       projects: [],
       achievements: []
     }));
+
+    setForceExpandedLayout(false);
+    setStickyExpandedLayout(false);
+    setProfessionalSummaryInput("");
+    setSkippedExperience(false);
+    setSkippedAchievements(false);
+    setProjectAtsMode({});
+    setExtendingBulletKey(null);
+    setExtendingProjectIndex(null);
 
     setEducationRows(seededEducation.length ? seededEducation : [{ ...emptyEducationRow }]);
     setExperienceRows(seededExperience.length ? seededExperience : [{ ...emptyExperienceRow }]);
@@ -438,7 +545,7 @@ const Resumes = () => {
     }
   };
 
-  const buildResumeDataSnapshot = (): ResumeData => {
+  const buildResumeDataSnapshot = (projectRowsOverride: ProjectRow[] = projectRows): ResumeData => {
     const education: Education[] = educationRows
       .map((row) => ({ ...row }))
       .filter((row) => row.school.trim() || row.degree.trim());
@@ -453,15 +560,6 @@ const Resumes = () => {
       }))
       .filter((row) => row.role.trim() || row.company.trim());
 
-    const projects: Project[] = projectRows
-      .map((row) => ({
-        name: row.name,
-        technologies: row.technologies,
-        date: row.date,
-        bullets: parseBullets(row.bulletText)
-      }))
-      .filter((row) => row.name.trim());
-
     const achievements: Achievement[] = achievementRows
       .map((row) => ({
         title: row.title,
@@ -469,6 +567,29 @@ const Resumes = () => {
         bullets: parseBullets(row.bulletText)
       }))
       .filter((row) => row.title.trim() || row.bullets.length > 0);
+
+    const professionalSummary = showProfessionalSummary ? professionalSummaryInput.trim() : "";
+
+    const maxProjectBullets = optimizeLayout(
+      {
+        ...resumeData,
+        education,
+        experience,
+        projects: [],
+        achievements,
+        professionalSummary
+      },
+      { forceExpanded: forceExpandedLayout, stickyExpanded: stickyExpandedLayout }
+    ).maxProjectBullets;
+
+    const projects: Project[] = projectRowsOverride
+      .map((row) => ({
+        name: row.name,
+        technologies: row.technologies,
+        date: row.date,
+        bullets: parseBullets(row.bulletText).slice(0, maxProjectBullets)
+      }))
+      .filter((row) => row.name.trim());
 
     const normalizedSections = skillSections
       .map((section) => ({
@@ -501,6 +622,7 @@ const Resumes = () => {
 
     return {
       ...resumeData,
+      professionalSummary: professionalSummary || undefined,
       education,
       experience,
       projects,
@@ -575,7 +697,30 @@ const Resumes = () => {
     return snapshot;
   };
 
-  const generateResumePdfBlobFallback = async (data: ResumeData) => {
+  const getPreviewConfig = (data: ResumeData): PreviewLayoutConfig => {
+    const optimized = optimizeLayout(data, {
+      forceExpanded: forceExpandedLayout,
+      stickyExpanded: stickyExpandedLayout
+    });
+
+    return {
+      layout: optimized.layout,
+      headerScale: optimized.fontScaling,
+      lineHeight: optimized.lineHeight,
+      sectionGap: optimized.sectionGap,
+      maxProjectBullets: optimized.maxProjectBullets,
+      skillFormat: optimized.skillFormat
+    };
+  };
+
+  const generateResumePdfBlobFallback = async (data: ResumeData, config: PreviewLayoutConfig) => {
+    const layout = config.layout || "COMPACT";
+    const headerScale = config.headerScale ?? 1;
+    const sectionGap = config.sectionGap ?? 15;
+    const lineHeightFactor = config.lineHeight ?? 1.15;
+    const maxProjectBullets = config.maxProjectBullets ?? 3;
+    const skillFormat = config.skillFormat ?? "INLINE";
+
     const doc = new jsPDF({ unit: "pt", format: "letter" });
     await ensurePdfSerifFont(doc);
     let y = 36;
@@ -583,18 +728,19 @@ const Resumes = () => {
     const contentWidth = 540;
     const centerX = doc.internal.pageSize.getWidth() / 2;
 
-    const writeLine = (text: string, x = left, lineHeight = 14) => {
+    const lineBase = Math.round(13 * lineHeightFactor);
+    const writeLine = (text: string, x = left, lineHeight = lineBase) => {
       y = ensurePdfY(doc, y);
       doc.text(text, x, y);
       y += lineHeight;
     };
 
-    const writeWrapped = (text: string, x = left, width = contentWidth, lineHeight = 14) => {
+    const writeWrapped = (text: string, x = left, width = contentWidth, lineHeight = lineBase) => {
       const lines = doc.splitTextToSize(text, width);
       lines.forEach((line: string) => writeLine(line, x, lineHeight));
     };
 
-    const writeLeftRight = (leftText: string, rightText?: string, lineHeight = 14) => {
+    const writeLeftRight = (leftText: string, rightText?: string, lineHeight = lineBase) => {
       const right = (rightText ?? "").trim();
       const rightWidth = right ? doc.getTextWidth(right) : 0;
       const leftWidth = right ? Math.max(140, contentWidth - rightWidth - 12) : contentWidth;
@@ -618,10 +764,10 @@ const Resumes = () => {
     };
 
     const writeSectionTitle = (title: string) => {
-      y += 8;
+      y += Math.round(sectionGap * 0.55);
       y = ensurePdfY(doc, y);
       doc.setFont(pdfSerifFontFamily, "bold");
-      doc.setFontSize(12);
+      doc.setFontSize(12 * headerScale);
       doc.text(title.toUpperCase(), left, y);
       y += 7;
       y = ensurePdfY(doc, y);
@@ -632,8 +778,19 @@ const Resumes = () => {
       doc.setFontSize(10.5);
     };
 
+    const writeProfessionalSummarySection = () => {
+      if (!data.professionalSummary?.trim()) {
+        return;
+      }
+
+      writeSectionTitle("Professional Summary");
+      doc.setFont(pdfSerifFontFamily, "normal");
+      doc.setFontSize(10);
+      writeWrapped(data.professionalSummary, left, contentWidth, lineBase);
+    };
+
     doc.setFont(pdfSerifFontFamily, "bold");
-    doc.setFontSize(22);
+    doc.setFontSize(22 * headerScale);
     y = ensurePdfY(doc, y);
     doc.text(data.name || "Candidate", centerX, y, { align: "center" });
     y += 24;
@@ -647,114 +804,201 @@ const Resumes = () => {
       lines.forEach((line: string) => {
         y = ensurePdfY(doc, y);
         doc.text(line, centerX, y, { align: "center" });
-        y += 13;
+        y += lineBase;
       });
       y += 2;
     }
 
-    if (data.education?.length) {
+    const writeEducationSection = () => {
+      if (!data.education?.length) {
+        return;
+      }
+
       writeSectionTitle("Education");
       data.education.forEach((item) => {
         doc.setFont(pdfSerifFontFamily, "bold");
-        writeLeftRight(item.school || "", item.location || "", 14);
+        writeLeftRight(item.school || "", item.location || "", lineBase);
 
         doc.setFont(pdfSerifFontFamily, "italic");
-        writeLeftRight([item.degree, item.grade].filter(Boolean).join(" - "), item.date || "", 14);
+        writeLeftRight([item.degree, item.grade].filter(Boolean).join(" - "), item.date || "", lineBase);
 
         doc.setFont(pdfSerifFontFamily, "normal");
         y += 3;
       });
-    }
+    };
 
-    if (data.experience?.length) {
+    const writeExperienceSection = () => {
+      if (!data.experience?.length) {
+        return;
+      }
+
       writeSectionTitle("Experience");
       data.experience.forEach((item) => {
         doc.setFont(pdfSerifFontFamily, "bold");
-        doc.setFontSize(10.8);
-        writeLeftRight(item.role || "", item.date || "", 14);
+        doc.setFontSize(10.8 * headerScale);
+        writeLeftRight(item.role || "", item.date || "", lineBase);
 
         doc.setFont(pdfSerifFontFamily, "italic");
-        doc.setFontSize(10.2);
-        writeLeftRight(item.company || "", item.location || "", 13);
+        doc.setFontSize(10.2 * headerScale);
+        writeLeftRight(item.company || "", item.location || "", lineBase);
 
         doc.setFont(pdfSerifFontFamily, "normal");
-        doc.setFontSize(10);
-        item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, 13));
+        doc.setFontSize(10 * headerScale);
+        item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, lineBase));
         y += 2;
       });
-    }
+    };
 
-    if (data.projects?.length) {
+    const writeProjectsSection = () => {
+      if (!data.projects?.length) {
+        return;
+      }
+
       writeSectionTitle("Projects");
       data.projects.forEach((item) => {
         doc.setFont(pdfSerifFontFamily, "bold");
-        doc.setFontSize(10.8);
+        doc.setFontSize(10.8 * headerScale);
         y = ensurePdfY(doc, y);
         const nameText = item.name || "";
         doc.text(nameText, left, y);
 
-        let leftX = left + doc.getTextWidth(nameText);
+        const leftX = left + doc.getTextWidth(nameText);
         if (item.technologies) {
           doc.setFont(pdfSerifFontFamily, "italic");
-          doc.setFontSize(10.2);
+          doc.setFontSize(10.2 * headerScale);
           const techText = ` | ${item.technologies}`;
           doc.text(techText, leftX + 2, y);
         }
 
         if (item.date) {
           doc.setFont(pdfSerifFontFamily, "italic");
-          doc.setFontSize(10.2);
+          doc.setFontSize(10.2 * headerScale);
           doc.text(item.date, left + contentWidth, y, { align: "right" });
         }
-        y += 13;
+        y += lineBase;
 
         doc.setFont(pdfSerifFontFamily, "normal");
-        doc.setFontSize(10);
-        item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, 13));
+        doc.setFontSize(10 * headerScale);
+        item.bullets.slice(0, maxProjectBullets).forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, lineBase));
         y += 2;
       });
-    }
+    };
 
-    if (data.achievements?.length) {
+    const writeAchievementsSection = () => {
+      if (!data.achievements?.length) {
+        return;
+      }
+
       writeSectionTitle("Achievements");
       data.achievements.forEach((item) => {
         doc.setFont(pdfSerifFontFamily, "bold");
-        doc.setFontSize(10.8);
-        writeLeftRight(item.title || "", item.date || "", 14);
+        doc.setFontSize(10.8 * headerScale);
+        writeLeftRight(item.title || "", item.date || "", lineBase);
         doc.setFont(pdfSerifFontFamily, "normal");
-        doc.setFontSize(10);
-        item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, 13));
+        doc.setFontSize(10 * headerScale);
+        item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, lineBase));
         y += 2;
       });
-    }
+    };
 
-    const skillLines = getRenderableSkillLines(data);
-    if (skillLines.length) {
+    const writeSkillsSection = () => {
+      const skillLines = getRenderableSkillLines(data);
+      if (!skillLines.length) {
+        return;
+      }
+
       writeSectionTitle("Skills");
       doc.setFont(pdfSerifFontFamily, "normal");
-      doc.setFontSize(10);
+      doc.setFontSize(10 * headerScale);
+
       skillLines.forEach((line) => {
-        writeWrapped(line.label ? `${line.label}: ${line.value}` : line.value, left, contentWidth, 13);
+        writeWrapped(line.label ? `${line.label}: ${line.value}` : line.value, left, contentWidth, lineBase);
       });
+
       doc.setFont(pdfSerifFontFamily, "normal");
+    };
+
+    const exhaustiveWithoutExperience = layout !== "COMPACT" && !(data.experience && data.experience.length > 0);
+    const writers = exhaustiveWithoutExperience
+      ? [writeProfessionalSummarySection, writeEducationSection, writeSkillsSection, writeProjectsSection, writeAchievementsSection, writeExperienceSection]
+      : [writeProfessionalSummarySection, writeEducationSection, writeExperienceSection, writeProjectsSection, writeAchievementsSection, writeSkillsSection];
+
+    writers.forEach((writer) => writer());
+
+    const totalPages = doc.getNumberOfPages();
+    if (totalPages > 1) {
+      for (let page = totalPages; page >= 2; page -= 1) {
+        doc.deletePage(page);
+      }
     }
 
     const buffer = doc.output("arraybuffer");
     return new Blob([buffer], { type: "application/pdf" });
   };
 
-  const generateResumePdfBlob = async (data: ResumeData) => {
-    return generateResumePdfBlobFallback(data);
+  const generateResumePdfBlob = async (data: ResumeData, config: PreviewLayoutConfig) => {
+    return generateResumePdfBlobFallback(data, config);
+  };
+
+  const countWrappedLines = async (text: string) => {
+    const doc = new jsPDF({ unit: "pt", format: "letter" });
+    await ensurePdfSerifFont(doc);
+    doc.setFont(pdfSerifFontFamily, "normal");
+    doc.setFontSize(PROJECT_BULLET_FONT_SIZE);
+    return doc.splitTextToSize(text, PROJECT_BULLET_WRAP_WIDTH).length;
+  };
+
+  const getProjectExtensionBudget = async (projectIndex: number, bulletIndex: number, projectRowsOverride: ProjectRow[] = projectRows) => {
+    const snapshot = buildResumeDataSnapshot(projectRowsOverride);
+    const usedLines = estimatePageLines(snapshot);
+    const freeLines = ONE_PAGE_LINE_LIMIT - usedLines;
+
+    if (freeLines <= 0) {
+      return { freeLines, maxLines: 0, currentBulletLines: 0 };
+    }
+
+    const row = projectRowsOverride[projectIndex];
+    const bullet = parseBullets(row?.bulletText ?? "")[bulletIndex] ?? "";
+    const currentBulletLines = bullet ? await countWrappedLines(`- ${bullet}`) : 1;
+
+    return {
+      freeLines,
+      currentBulletLines,
+      maxLines: currentBulletLines + freeLines
+    };
   };
 
   const goNext = () => {
-    applyStepData();
+    const snapshot = applyStepData();
 
-    if (builderStep === 0 && (!resumeData.name.trim() || !resumeData.email.trim())) {
+    if (builderStep === stepIndexes.experience && (snapshot.experience?.length ?? 0) > 0) {
+      setSkippedExperience(false);
+    }
+
+    if (builderStep === stepIndexes.achievements && (snapshot.achievements?.length ?? 0) > 0) {
+      setSkippedAchievements(false);
+    }
+
+    if (builderStep === 0 && (!snapshot.name.trim() || !snapshot.email.trim())) {
       toast.info("Name and email are recommended for a complete resume");
     }
 
     setBuilderStep((step) => Math.min(step + 1, stepTitles.length - 1));
+  };
+
+  const skipCurrentOptionalStep = () => {
+    if (builderStep === stepIndexes.experience) {
+      setSkippedExperience(true);
+      setExperienceRows([{ ...emptyExperienceRow }]);
+      setBuilderStep(stepIndexes.achievements);
+      return;
+    }
+
+    if (builderStep === stepIndexes.achievements) {
+      setSkippedAchievements(true);
+      setAchievementRows([{ ...emptyAchievementRow }]);
+      setBuilderStep(stepIndexes.skills);
+    }
   };
 
   const goBack = () => {
@@ -767,15 +1011,24 @@ const Resumes = () => {
     }
 
     const snapshot = applyStepData();
+    const previewConfig = getPreviewConfig(snapshot);
 
     try {
       setSavingBuilderResume(true);
       const title = `${snapshot.name || "Candidate"} - Jake Resume`;
-      const pdfBlob = await generateResumePdfBlob(snapshot);
+      const pdfBlob = await generateResumePdfBlob(snapshot, previewConfig);
       const pdfFile = new File([pdfBlob], `${title}.pdf`, { type: "application/pdf" });
+      const sections = [
+        snapshot.professionalSummary?.trim(),
+        (snapshot.education?.length ?? 0) > 0,
+        (snapshot.experience?.length ?? 0) > 0,
+        (snapshot.projects?.length ?? 0) > 0,
+        (snapshot.achievements?.length ?? 0) > 0,
+        getRenderableSkillLines(snapshot).length > 0
+      ].filter(Boolean).length;
       const formData = new FormData();
       formData.append("title", title);
-      formData.append("sections", "6");
+      formData.append("sections", String(sections));
       formData.append("resumeFile", pdfFile);
 
       await apiRequest<{ resume: ResumeItem }>("/resumes", {
@@ -800,6 +1053,179 @@ const Resumes = () => {
   const removeRow = <T,>(setter: React.Dispatch<React.SetStateAction<T[]>>, index: number) => {
     setter((current) => current.filter((_, i) => i !== index));
   };
+
+  const updateProjectBulletAt = (projectIndex: number, bulletIndex: number, nextBullet: string) => {
+    const row = projectRows[projectIndex];
+    if (!row) {
+      return;
+    }
+
+    const bullets = parseBullets(row.bulletText);
+    if (!bullets[bulletIndex]) {
+      return;
+    }
+
+    bullets[bulletIndex] = nextBullet.trim();
+    updateRow(setProjectRows, projectIndex, { bulletText: bullets.join("\n") });
+  };
+
+  const handleExtendProjectBullet = async (projectIndex: number, bulletIndex: number) => {
+    if (!idToken) {
+      toast.error("Sign in first");
+      return;
+    }
+
+    const row = projectRows[projectIndex];
+    if (!row) {
+      return;
+    }
+
+    const bullets = parseBullets(row.bulletText);
+    const bullet = bullets[bulletIndex];
+    if (!bullet) {
+      toast.error("Bullet text required");
+      return;
+    }
+
+    const budget = await getProjectExtensionBudget(projectIndex, bulletIndex);
+    if (budget.freeLines <= 0 || budget.maxLines <= 0) {
+      toast.info("No room left on the page to extend this bullet.");
+      return;
+    }
+
+    const key = `${projectIndex}-${bulletIndex}`;
+    try {
+      setExtendingBulletKey(key);
+      const response = await apiRequest<{ improvedBullet: string }>("/ai/project-bullet/extend", {
+        method: "POST",
+        token: idToken,
+        body: {
+          bullet,
+          projectName: row.name,
+          technologies: row.technologies,
+          atsOptimized: Boolean(projectAtsMode[projectIndex]),
+          maxLines: budget.maxLines
+        }
+      });
+
+      const improved = (response.data.improvedBullet || "").trim();
+      if (!improved) {
+        toast.error("AI returned empty output");
+        return;
+      }
+
+      const improvedLines = await countWrappedLines(`- ${improved}`);
+      if (improvedLines > budget.maxLines) {
+        toast.info("AI output exceeded the remaining page space, so it was not applied.");
+        return;
+      }
+
+      updateProjectBulletAt(projectIndex, bulletIndex, improved);
+      toast.success("Bullet extended successfully");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to extend bullet");
+    } finally {
+      setExtendingBulletKey(null);
+    }
+  };
+
+  const handleExtendAllProjectBullets = async (projectIndex: number) => {
+    if (!idToken) {
+      toast.error("Sign in first");
+      return;
+    }
+
+    const row = projectRows[projectIndex];
+    if (!row) {
+      return;
+    }
+
+    const bullets = parseBullets(row.bulletText);
+    if (!bullets.length) {
+      toast.error("Add at least one project bullet first");
+      return;
+    }
+
+    try {
+      setExtendingProjectIndex(projectIndex);
+      const draftProjectRows = [...projectRows];
+      const nextBullets = [...bullets];
+      let improvedCount = 0;
+
+      for (let i = 0; i < bullets.length; i += 1) {
+        const currentBullet = bullets[i];
+        if (!currentBullet) {
+          continue;
+        }
+
+        draftProjectRows[projectIndex] = {
+          ...row,
+          bulletText: nextBullets.join("\n")
+        };
+
+        const budget = await getProjectExtensionBudget(projectIndex, i, draftProjectRows);
+        if (budget.freeLines <= 0 || budget.maxLines <= 0) {
+          toast.info("No room left on the page to extend the remaining bullets.");
+          break;
+        }
+
+        const response = await apiRequest<{ improvedBullet: string }>("/ai/project-bullet/extend", {
+          method: "POST",
+          token: idToken,
+          body: {
+            bullet: currentBullet,
+            projectName: row.name,
+            technologies: row.technologies,
+            atsOptimized: Boolean(projectAtsMode[projectIndex]),
+            maxLines: budget.maxLines
+          }
+        });
+
+        const improved = (response.data.improvedBullet || "").trim();
+        if (improved) {
+          const improvedLines = await countWrappedLines(`- ${improved}`);
+          if (improvedLines > budget.maxLines) {
+            toast.info("One bullet exceeded the page budget and was skipped.");
+            continue;
+          }
+
+          nextBullets[i] = improved;
+          improvedCount += 1;
+        }
+      }
+
+      updateRow(setProjectRows, projectIndex, { bulletText: nextBullets.join("\n") });
+      toast.success(`Extended ${improvedCount}/${bullets.length} bullets`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to extend all bullets");
+    } finally {
+      setExtendingProjectIndex(null);
+    }
+  };
+
+  const handleFillPage = () => {
+    setForceExpandedLayout(true);
+    setStickyExpandedLayout(true);
+
+    projectRows.forEach((row, index) => {
+      const bullets = parseBullets(row.bulletText);
+      if (!bullets.length) {
+        updateRow(setProjectRows, index, {
+          bulletText: [
+            "Built and shipped a production-ready feature with measurable impact",
+            "Improved performance and reliability through focused optimizations",
+            "Collaborated with team members to refine architecture decisions",
+            "Key Achievement: Improved user outcomes with data-backed iteration",
+            "Tech Stack Deep Dive: Designed APIs and persistence around core modules"
+          ].join("\n")
+        });
+      }
+    });
+
+    toast.success("Fill Page mode enabled: spacing and project depth optimized.");
+  };
+
+  const projectEnhancementMode = skippedExperience || skippedAchievements;
 
   return (
     <div className="p-8 max-w-5xl">
@@ -1038,7 +1464,23 @@ const Resumes = () => {
             </div>
           ) : null}
 
-          {builderStep === 1 ? (
+          {builderStep === stepIndexes.professionalSummary ? (
+            <div className="space-y-3">
+              <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Add a concise, ATS-friendly summary. Keep it to 2-3 lines and focus on your strengths, domain, and impact.
+                </p>
+                <Textarea
+                  placeholder="Professional Summary"
+                  value={professionalSummaryInput}
+                  onChange={(event) => setProfessionalSummaryInput(event.target.value)}
+                  className="min-h-[96px]"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {builderStep === stepIndexes.education ? (
             <div className="space-y-3">
               {educationRows.map((row, index) => (
                 <div key={`edu-${index}`} className="grid grid-cols-5 gap-2 rounded-md border border-border/40 p-3">
@@ -1060,7 +1502,7 @@ const Resumes = () => {
             </div>
           ) : null}
 
-          {builderStep === 2 ? (
+          {builderStep === stepIndexes.experience ? (
             <div className="space-y-3">
               {experienceRows.map((row, index) => (
                 <div key={`exp-${index}`} className="rounded-md border border-border/40 p-3 space-y-2">
@@ -1086,32 +1528,7 @@ const Resumes = () => {
             </div>
           ) : null}
 
-          {builderStep === 3 ? (
-            <div className="space-y-3">
-              {projectRows.map((row, index) => (
-                <div key={`proj-${index}`} className="rounded-md border border-border/40 p-3 space-y-2">
-                  <div className="grid grid-cols-3 gap-2">
-                    <Input placeholder="Project Name" value={row.name} onChange={(event) => updateRow(setProjectRows, index, { name: event.target.value })} />
-                    <Input placeholder="Technologies" value={row.technologies} onChange={(event) => updateRow(setProjectRows, index, { technologies: event.target.value })} />
-                    <Input placeholder="Date" value={row.date} onChange={(event) => updateRow(setProjectRows, index, { date: event.target.value })} />
-                  </div>
-                  <Textarea
-                    placeholder="Bullet points (one per line)"
-                    value={row.bulletText}
-                    onChange={(event) => updateRow(setProjectRows, index, { bulletText: event.target.value })}
-                  />
-                  <Button variant="ghost" size="sm" onClick={() => removeRow(setProjectRows, index)}>
-                    <Trash2 className="h-4 w-4 mr-1" /> Remove Row
-                  </Button>
-                </div>
-              ))}
-              <Button variant="outline" onClick={() => setProjectRows((current) => [...current, { ...emptyProjectRow }])}>
-                <Plus className="h-4 w-4 mr-2" /> Add Project
-              </Button>
-            </div>
-          ) : null}
-
-          {builderStep === 4 ? (
+          {builderStep === stepIndexes.achievements ? (
             <div className="space-y-3">
               {achievementRows.map((row, index) => (
                 <div key={`ach-${index}`} className="rounded-md border border-border/40 p-3 space-y-2">
@@ -1135,7 +1552,7 @@ const Resumes = () => {
             </div>
           ) : null}
 
-          {builderStep === 5 ? (
+          {builderStep === stepIndexes.skills ? (
             <div className="space-y-3">
               {skillSections.map((section, sectionIndex) => (
                 <div key={`skill-section-${sectionIndex}`} className="rounded-md border border-border/40 p-3 space-y-2">
@@ -1174,16 +1591,115 @@ const Resumes = () => {
             </div>
           ) : null}
 
-          {builderStep === 6 ? (
+          {builderStep === stepIndexes.projects ? (
+            <div className="space-y-3">
+              {projectEnhancementMode ? (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 space-y-1">
+                  <p className="font-medium">Experience/Achievements skipped: Projects must carry more weight.</p>
+                  <p>Increase each project bullet from ~1 line to at least 2 lines for stronger impact.</p>
+                </div>
+              ) : null}
+
+              {forceExpandedLayout ? (
+                <p className="text-xs text-muted-foreground">
+                  Expanded mode active: up to 5 bullets per project are used. Add "Key Achievement" or "Tech Stack Deep Dive" lines for stronger impact.
+                </p>
+              ) : null}
+
+              {projectRows.map((row, index) => (
+                <div key={`proj-${index}`} className="rounded-md border border-border/40 p-3 space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input placeholder="Project Name" value={row.name} onChange={(event) => updateRow(setProjectRows, index, { name: event.target.value })} />
+                    <Input placeholder="Technologies" value={row.technologies} onChange={(event) => updateRow(setProjectRows, index, { technologies: event.target.value })} />
+                    <Input placeholder="Date" value={row.date} onChange={(event) => updateRow(setProjectRows, index, { date: event.target.value })} />
+                  </div>
+                  <Textarea
+                    placeholder="Bullet points (one per line)"
+                    value={row.bulletText}
+                    onChange={(event) => updateRow(setProjectRows, index, { bulletText: event.target.value })}
+                  />
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <label className="text-xs text-muted-foreground flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(projectAtsMode[index])}
+                        onChange={(event) =>
+                          setProjectAtsMode((current) => ({
+                            ...current,
+                            [index]: event.target.checked
+                          }))
+                        }
+                      />
+                      Make it ATS-Optimized
+                    </label>
+                    <div className="flex items-center gap-2">
+                      {projectEnhancementMode ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={extendingProjectIndex === index || Boolean(extendingBulletKey)}
+                          onClick={() => void handleExtendAllProjectBullets(index)}
+                        >
+                          {extendingProjectIndex === index ? "Extending All..." : "Extend All Bullets"}
+                        </Button>
+                      ) : null}
+                      <Button variant="ghost" size="sm" onClick={() => removeRow(setProjectRows, index)}>
+                        <Trash2 className="h-4 w-4 mr-1" /> Remove Row
+                      </Button>
+                    </div>
+                  </div>
+
+                  {projectEnhancementMode ? (
+                    <div className="rounded-md border border-primary/25 bg-primary/5 p-2 space-y-2">
+                      <p className="text-xs text-muted-foreground">Increase impact by expanding this point:</p>
+                      {parseBullets(row.bulletText).map((bullet, bulletIndex) => {
+                        const bulletKey = `${index}-${bulletIndex}`;
+                        const isExtending = extendingBulletKey === bulletKey || extendingProjectIndex === index;
+                        return (
+                          <div key={bulletKey} className="flex items-start justify-between gap-2 border border-border/30 rounded p-2 bg-background">
+                            <p className="text-xs flex-1">- {bullet}</p>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={isExtending}
+                              onClick={() => void handleExtendProjectBullet(index, bulletIndex)}
+                            >
+                              {isExtending ? "Extending..." : "Extend Length"}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              <Button variant="outline" onClick={() => setProjectRows((current) => [...current, { ...emptyProjectRow }])}>
+                <Plus className="h-4 w-4 mr-2" /> Add Project
+              </Button>
+            </div>
+          ) : null}
+
+          {builderStep === stepIndexes.preview ? (
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">Preview your Jake-style resume before saving.</p>
               <div className="bg-white">
-                <JakeResumePreview data={buildResumeDataSnapshot()} />
+                <JakeResumePreview
+                  data={buildResumeDataSnapshot()}
+                  config={getPreviewConfig(buildResumeDataSnapshot())}
+                />
               </div>
             </div>
           ) : null}
 
           <DialogFooter>
+            <Button variant="outline" onClick={handleFillPage}>
+              <Wand2 className="h-4 w-4 mr-2" /> Fill Page
+            </Button>
+            {builderStep === stepIndexes.experience || builderStep === stepIndexes.achievements ? (
+              <Button variant="outline" onClick={skipCurrentOptionalStep}>
+                Skip This Optional Step
+              </Button>
+            ) : null}
             <Button variant="outline" onClick={goBack} disabled={builderStep === 0}>
               Back
             </Button>

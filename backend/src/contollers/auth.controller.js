@@ -5,6 +5,18 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { z } from "zod";
+import {
+  AchievementEntry,
+  EducationEntry,
+  ExperienceEntry,
+  normalizeSkillBuckets,
+  normalizeTextArray,
+  SkillSection
+} from "../classes/profile.classes.js";
+import { env } from "../config/env.js";
+import { createOAuthState, verifyOAuthState } from "../utils/vercel-oauth-state.js";
+import { VercelService } from "../services/vercel.service.js";
+import { encryptToken } from "../utils/vercel-token-crypto.js";
 
 const updateProfileSchema = z.object({
   displayName: z.string().min(2).max(80).optional(),
@@ -18,9 +30,9 @@ const updateProfileSchema = z.object({
   educationEntries: z
     .array(
       z.object({
-        degree: z.string().min(1).max(120),
+        degree: z.string().max(120).optional().default(""),
         specialization: z.string().max(120).optional().default(""),
-        college: z.string().min(1).max(160),
+        college: z.string().max(160).optional().default(""),
         location: z.string().max(120).optional().default(""),
         endDate: z.string().max(60).optional().default(""),
         grade: z.string().max(40).optional().default("")
@@ -35,7 +47,7 @@ const updateProfileSchema = z.object({
   skillSections: z
     .array(
       z.object({
-        title: z.string().min(1).max(80),
+        title: z.string().max(80).optional().default(""),
         skills: z.array(z.string().min(1).max(80)).max(20)
       })
     )
@@ -44,8 +56,8 @@ const updateProfileSchema = z.object({
   experience: z
     .array(
       z.object({
-        role: z.string().min(1).max(120),
-        company: z.string().min(1).max(120),
+        role: z.string().max(120).optional().default(""),
+        company: z.string().max(120).optional().default(""),
         location: z.string().max(120).optional().default(""),
         date: z.string().max(60).optional().default(""),
         bullets: z.array(z.string().min(1).max(200)).max(10)
@@ -56,7 +68,7 @@ const updateProfileSchema = z.object({
   achievements: z
     .array(
       z.object({
-        title: z.string().min(1).max(120),
+        title: z.string().max(120).optional().default(""),
         date: z.string().max(60).optional().default(""),
         bullets: z.array(z.string().min(1).max(200)).max(10)
       })
@@ -133,43 +145,138 @@ export const updateCurrentUser = asyncHandler(async (req, res) => {
     user.geeksForGeeksId = parsed.data.geeksForGeeksId;
   }
 
-  if (parsed.data.education !== undefined) {
-    user.education = parsed.data.education;
+  const hasEducationEntriesUpdate = parsed.data.educationEntries !== undefined;
+  const hasSkillUpdate =
+    parsed.data.skillSections !== undefined ||
+    parsed.data.skillLanguages !== undefined ||
+    parsed.data.skillFrameworks !== undefined ||
+    parsed.data.skillTools !== undefined ||
+    parsed.data.skillLibraries !== undefined;
+
+  if (hasEducationEntriesUpdate) {
+    const normalizedEducationEntries = EducationEntry.fromList(parsed.data.educationEntries)
+      .filter((entry) => !entry.isEmpty());
+
+    user.educationEntries = normalizedEducationEntries.map((entry) => entry.toObject());
+    user.education = normalizedEducationEntries.map((entry) => entry.toSummaryLine()).filter(Boolean);
+  } else if (parsed.data.education !== undefined) {
+    user.education = normalizeTextArray(parsed.data.education);
   }
 
-  if (parsed.data.educationEntries !== undefined) {
-    user.educationEntries = parsed.data.educationEntries;
-  }
+  if (hasSkillUpdate) {
+    const skillSections = parsed.data.skillSections !== undefined
+      ? SkillSection.fromList(parsed.data.skillSections).filter((section) => !section.isEmpty()).map((section) => section.toObject())
+      : user.skillSections;
 
-  if (parsed.data.skillLanguages !== undefined) {
-    user.skillLanguages = parsed.data.skillLanguages;
-  }
+    const normalizedBuckets = normalizeSkillBuckets({
+      skillSections,
+      skillLanguages: parsed.data.skillLanguages !== undefined ? parsed.data.skillLanguages : user.skillLanguages,
+      skillFrameworks: parsed.data.skillFrameworks !== undefined ? parsed.data.skillFrameworks : user.skillFrameworks,
+      skillTools: parsed.data.skillTools !== undefined ? parsed.data.skillTools : user.skillTools,
+      skillLibraries: parsed.data.skillLibraries !== undefined ? parsed.data.skillLibraries : user.skillLibraries
+    });
 
-  if (parsed.data.skillFrameworks !== undefined) {
-    user.skillFrameworks = parsed.data.skillFrameworks;
-  }
-
-  if (parsed.data.skillTools !== undefined) {
-    user.skillTools = parsed.data.skillTools;
-  }
-
-  if (parsed.data.skillLibraries !== undefined) {
-    user.skillLibraries = parsed.data.skillLibraries;
-  }
-
-  if (parsed.data.skillSections !== undefined) {
-    user.skillSections = parsed.data.skillSections;
+    user.skillSections = normalizedBuckets.skillSections;
+    user.skillLanguages = normalizedBuckets.skillLanguages;
+    user.skillFrameworks = normalizedBuckets.skillFrameworks;
+    user.skillTools = normalizedBuckets.skillTools;
+    user.skillLibraries = normalizedBuckets.skillLibraries;
   }
 
   if (parsed.data.experience !== undefined) {
-    user.experience = parsed.data.experience;
+    user.experience = ExperienceEntry.fromList(parsed.data.experience)
+      .filter((entry) => !entry.isEmpty())
+      .map((entry) => entry.toObject());
   }
 
   if (parsed.data.achievements !== undefined) {
-    user.achievements = parsed.data.achievements;
+    user.achievements = AchievementEntry.fromList(parsed.data.achievements)
+      .filter((entry) => !entry.isEmpty())
+      .map((entry) => entry.toObject());
   }
 
   await user.save();
 
   return res.status(200).json(new ApiResponse(200, { user }, "Profile updated successfully"));
+});
+
+export const startVercelOAuth = asyncHandler(async (req, res) => {
+  if (!env.VERCEL_OAUTH_CLIENT_ID || !env.VERCEL_OAUTH_REDIRECT_URI) {
+    throw new ApiError(500, "Vercel OAuth is not configured");
+  }
+
+  const state = createOAuthState({
+    uid: req.auth.uid,
+    ts: Date.now(),
+    redirectTo: typeof req.query.redirectTo === "string" ? req.query.redirectTo : ""
+  });
+
+  const oauthUrl = new URL("https://vercel.com/oauth/authorize");
+  oauthUrl.searchParams.set("client_id", env.VERCEL_OAUTH_CLIENT_ID);
+  oauthUrl.searchParams.set("redirect_uri", env.VERCEL_OAUTH_REDIRECT_URI);
+  oauthUrl.searchParams.set("scope", env.VERCEL_OAUTH_SCOPE);
+  oauthUrl.searchParams.set("state", state);
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        authorizationUrl: oauthUrl.toString()
+      },
+      "Vercel OAuth URL generated"
+    )
+  );
+});
+
+export const handleVercelOAuthCallback = asyncHandler(async (req, res) => {
+  const { code, state, teamId } = req.query;
+
+  if (!code || typeof code !== "string") {
+    throw new ApiError(400, "Missing OAuth code");
+  }
+
+  if (!state || typeof state !== "string") {
+    throw new ApiError(400, "Missing OAuth state");
+  }
+
+  const parsedState = verifyOAuthState(state);
+  const maxStateAgeMs = 10 * 60 * 1000;
+
+  if (!parsedState?.uid || !parsedState?.ts || Date.now() - parsedState.ts > maxStateAgeMs) {
+    throw new ApiError(400, "OAuth state is invalid or expired");
+  }
+
+  const tokenPayload = await VercelService.exchangeOAuthCode({ code });
+  const user = await findUserByFirebaseUid(parsedState.uid);
+  const encrypted = encryptToken(tokenPayload.access_token || "");
+
+  user.vercelConnection = {
+    ...encrypted,
+    teamId: typeof teamId === "string" ? teamId : tokenPayload.team_id || "",
+    scope: tokenPayload.scope || env.VERCEL_OAUTH_SCOPE,
+    connectedAt: new Date()
+  };
+
+  await user.save();
+
+  if (parsedState.redirectTo) {
+    const redirectUrl = new URL(parsedState.redirectTo);
+    redirectUrl.searchParams.set("vercel_connected", "1");
+    if (user.vercelConnection.teamId) {
+      redirectUrl.searchParams.set("vercel_team_id", user.vercelConnection.teamId);
+    }
+    return res.redirect(302, redirectUrl.toString());
+  }
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        connected: true,
+        teamId: user.vercelConnection.teamId,
+        scope: user.vercelConnection.scope
+      },
+      "Vercel connected successfully"
+    )
+  );
 });

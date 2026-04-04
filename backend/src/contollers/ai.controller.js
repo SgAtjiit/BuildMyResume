@@ -3,6 +3,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import {
+  expandProjectBullet,
   generateLatexSectionEdit,
   generateTailoredLatex,
   generateTailoredResume
@@ -24,6 +25,15 @@ import { Resume } from "../models/resume.models.js";
 import { TailoredResume } from "../models/tailoredResume.models.js";
 import { Project } from "../models/project.models.js";
 import { findUserByFirebaseUid } from "../services/user.service.js";
+import {
+  AchievementEntry,
+  EducationEntry,
+  ExperienceEntry,
+  ProjectEntry,
+  normalizeSkillBuckets,
+  normalizeTextArray,
+  SkillSection
+} from "../classes/profile.classes.js";
 
 const tailorSchema = z.object({
   jobDescription: z.string().min(20, "jobDescription must be at least 20 characters"),
@@ -56,6 +66,14 @@ const editSectionSchema = z.object({
 
 const acceptTailoredSchema = z.object({
   tailoredResumeId: z.string().min(1, "tailoredResumeId is required")
+});
+
+const expandProjectBulletSchema = z.object({
+  bullet: z.string().min(8, "bullet must be at least 8 characters"),
+  projectName: z.string().max(180).optional().default(""),
+  technologies: z.string().max(300).optional().default(""),
+  atsOptimized: z.boolean().optional().default(false),
+  maxLines: z.number().int().min(1).max(30).optional().default(2)
 });
 
 const stripMarkdownCodeFence = (value) =>
@@ -123,42 +141,53 @@ const collectSkillValues = (skills) => {
 };
 
 const collectUserSkillValues = (user) => {
-  const sectionSkills = Array.isArray(user.skillSections) ? user.skillSections.flatMap((section) => section.skills || []) : [];
+  const normalizedSkillBuckets = normalizeSkillBuckets({
+    skillSections: user.skillSections,
+    skillLanguages: user.skillLanguages,
+    skillFrameworks: user.skillFrameworks,
+    skillTools: user.skillTools,
+    skillLibraries: user.skillLibraries
+  });
 
-  return [user.skillLanguages, user.skillFrameworks, user.skillTools, user.skillLibraries, sectionSkills]
+  const sectionSkills = normalizedSkillBuckets.skillSections.flatMap((section) => section.skills || []);
+
+  return [
+    normalizedSkillBuckets.skillLanguages,
+    normalizedSkillBuckets.skillFrameworks,
+    normalizedSkillBuckets.skillTools,
+    normalizedSkillBuckets.skillLibraries,
+    sectionSkills
+  ]
     .flat()
     .map((item) => normalizeText(item))
     .filter(Boolean);
 };
 
 const collectUserSkillSections = (user) => {
-  if (!Array.isArray(user.skillSections)) {
-    return [];
-  }
-
-  return user.skillSections
-    .map((section) => ({
-      title: normalizeText(section.title),
-      skills: uniqueStrings(Array.isArray(section.skills) ? section.skills : [])
-    }))
-    .filter((section) => section.title || section.skills.length);
+  return SkillSection.fromList(user.skillSections)
+    .filter((section) => !section.isEmpty())
+    .map((section) => section.toObject());
 };
 
 const collectUserExperienceValues = (user) => {
-  return Array.isArray(user.experience)
-    ? user.experience.map((item, index) => formatRecommendedExperience(item, `user-experience-${index}`))
-    : [];
+  return ExperienceEntry.fromList(user.experience)
+    .filter((item) => !item.isEmpty())
+    .map((item, index) => formatRecommendedExperience(item.toObject(), `user-experience-${index}`));
 };
 
 const collectUserAchievementValues = (user) => {
-  return Array.isArray(user.achievements)
-    ? user.achievements.map((item, index) => formatRecommendedAchievement(item, `user-achievement-${index}`))
-    : [];
+  return AchievementEntry.fromList(user.achievements)
+    .filter((item) => !item.isEmpty())
+    .map((item, index) => formatRecommendedAchievement(item.toObject(), `user-achievement-${index}`));
 };
 
 const collectStructuredExperienceBlocks = (user, fallbackStructuredResume) => {
-  if (Array.isArray(user.experience) && user.experience.length) {
-    return user.experience.map((item, index) => formatRecommendedExperience(item, `user-experience-${index}`));
+  const userExperiences = ExperienceEntry.fromList(user.experience)
+    .filter((item) => !item.isEmpty())
+    .map((item) => item.toObject());
+
+  if (userExperiences.length) {
+    return userExperiences.map((item, index) => formatRecommendedExperience(item, `user-experience-${index}`));
   }
 
   return Array.isArray(fallbackStructuredResume?.experience)
@@ -167,8 +196,12 @@ const collectStructuredExperienceBlocks = (user, fallbackStructuredResume) => {
 };
 
 const collectStructuredAchievementBlocks = (user, fallbackStructuredResume) => {
-  if (Array.isArray(user.achievements) && user.achievements.length) {
-    return user.achievements.map((item, index) => formatRecommendedAchievement(item, `user-achievement-${index}`));
+  const userAchievements = AchievementEntry.fromList(user.achievements)
+    .filter((item) => !item.isEmpty())
+    .map((item) => item.toObject());
+
+  if (userAchievements.length) {
+    return userAchievements.map((item, index) => formatRecommendedAchievement(item, `user-achievement-${index}`));
   }
 
   return Array.isArray(fallbackStructuredResume?.achievements)
@@ -439,14 +472,19 @@ const rankStructuredItems = (items, scorer) => {
     });
 };
 
-const formatRecommendedProject = (project) => ({
-  id: project._id,
-  title: project.title,
-  description: project.description,
-  stack: project.stack || [],
-  githubUrl: project.githubUrl || "",
-  demoUrl: project.demoUrl || ""
-});
+const formatRecommendedProject = (project) => {
+  const normalized = ProjectEntry.from(project).toObject();
+
+  return {
+    id: String(project._id || project.id || ""),
+    title: normalized.title,
+    description: normalized.description,
+    stack: normalized.stack,
+    date: normalized.date,
+    githubUrl: normalized.githubUrl,
+    demoUrl: normalized.demoUrl
+  };
+};
 
 const formatRecommendedExperience = (experience, id) => ({
   id,
@@ -473,11 +511,7 @@ const formatResumeSnapshot = (resumeData) => ({
 });
 
 const formatEducationEntry = (entry) => {
-  const parts = [entry.degree, entry.specialization, entry.college, entry.location, entry.endDate, entry.grade]
-    .map((item) => normalizeText(item))
-    .filter(Boolean);
-
-  return parts.join(" | ");
+  return EducationEntry.from(entry).toSummaryLine();
 };
 
 const buildStructuredSourceForAi = ({
@@ -654,14 +688,7 @@ export const tailorResumeLatex = asyncHandler(async (req, res) => {
   const selectedProjects = userProjects
     .filter((project) => approvedProjectIdSet.has(String(project._id)))
     .slice(0, 3)
-    .map((project) => ({
-      id: String(project._id),
-      title: project.title,
-      description: project.description || "",
-      stack: project.stack || [],
-      githubUrl: project.githubUrl || "",
-      demoUrl: project.demoUrl || ""
-    }));
+    .map((project) => formatRecommendedProject(project));
 
   const selectedExperiences = rankedExperiences
     .filter((item) => approvedExperienceIdSet.has(item.id))
@@ -692,10 +719,10 @@ export const tailorResumeLatex = asyncHandler(async (req, res) => {
     leetCodeId: user.leetCodeId || "",
     geeksForGeeksId: user.geeksForGeeksId || "",
     education: Array.isArray(user.educationEntries) && user.educationEntries.length
-      ? user.educationEntries.map((entry) => formatEducationEntry(entry))
-      : Array.isArray(user.education)
-        ? user.education
-        : []
+      ? EducationEntry.fromList(user.educationEntries)
+          .filter((entry) => !entry.isEmpty())
+          .map((entry) => entry.toSummaryLine())
+      : normalizeTextArray(user.education)
   };
 
   const frontendResumePayload = parsed.data.resumePayload && typeof parsed.data.resumePayload === "object" ? parsed.data.resumePayload : null;
@@ -836,21 +863,11 @@ export const getTailorInputs = asyncHandler(async (req, res) => {
   const jdKeywords = parsed.data.jobDescription.trim() ? extractJobKeywords(parsed.data.jobDescription) : [];
 
   const projectViews = projects.map((project) => ({
-    id: String(project._id),
-    title: project.title,
-    description: project.description || "",
-    stack: project.stack || [],
-    githubUrl: project.githubUrl || "",
-    demoUrl: project.demoUrl || ""
+    ...formatRecommendedProject(project)
   }));
 
   const rankedProjectViews = rankProjectsForJd(projects, jdKeywords).map((item) => ({
-        id: String(item.project._id),
-        title: item.project.title,
-        description: item.project.description || "",
-        stack: item.project.stack || [],
-        githubUrl: item.project.githubUrl || "",
-        demoUrl: item.project.demoUrl || "",
+        ...formatRecommendedProject(item.project),
         relevanceScore: item.score
       }));
 
@@ -998,6 +1015,38 @@ export const acceptTailoredResume = asyncHandler(async (req, res) => {
         pdfPath: tailored.pdfPath
       },
       "Tailored resume accepted"
+    )
+  );
+});
+
+export const extendProjectBullet = asyncHandler(async (req, res) => {
+  const parsed = expandProjectBulletSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    throw new ApiError(400, "Invalid project bullet payload", parsed.error.issues);
+  }
+
+  // Verify authenticated user exists; expansion is available only for signed-in users.
+  await findUserByFirebaseUid(req.auth.uid);
+
+  let improvedBullet = "";
+  try {
+    improvedBullet = await expandProjectBullet(parsed.data);
+  } catch (error) {
+    throw new ApiError(502, error instanceof Error ? error.message : "AI provider request failed");
+  }
+
+  if (!improvedBullet) {
+    throw new ApiError(502, "AI provider returned empty bullet output");
+  }
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        improvedBullet
+      },
+      "Project bullet expanded successfully"
     )
   );
 });
