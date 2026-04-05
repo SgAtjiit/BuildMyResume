@@ -178,3 +178,47 @@ export const expandProjectBullet = async ({
     throw new Error(`Groq request failed: ${providerMessage}`);
   }
 };
+
+export const generateProfileSummary = async ({
+  profileSource,
+  tone = "professional",
+  maxWords = 90
+}) => {
+  const safeMaxWords = Number.isFinite(maxWords) ? Math.min(Math.max(Math.trunc(maxWords), 40), 180) : 90;
+
+  const systemPrompt = [
+    "You are an expert personal branding and resume writing assistant.",
+    "Write a concise first-person profile summary that is factual and ATS-friendly.",
+    "Use only information provided in the source data.",
+    "Do not invent employers, achievements, metrics, or technologies.",
+    "Return plain text only, no markdown, no bullets, no heading."
+  ].join(" ");
+
+  const userPrompt = [
+    `Tone: ${tone}`,
+    `Maximum words: ${safeMaxWords}`,
+    "Profile source data:",
+    profileSource,
+    "Instructions:",
+    "1) Mention strongest skills and project/achievement evidence when available.",
+    "2) Keep it natural and confident, suitable for portfolio/resume summary section.",
+    "3) 3 to 5 sentences maximum.",
+    "4) Output plain text only."
+  ].join("\n\n");
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: env.GROQ_MODEL,
+      temperature: 0.35,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
+    });
+
+    return completion.choices?.[0]?.message?.content?.trim() || "";
+  } catch (error) {
+    const providerMessage = error instanceof Error ? error.message : "Unknown Groq API error";
+    throw new Error(`Groq request failed: ${providerMessage}`);
+  }
+};

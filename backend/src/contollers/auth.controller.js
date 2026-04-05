@@ -20,6 +20,7 @@ import { encryptToken } from "../utils/vercel-token-crypto.js";
 
 const updateProfileSchema = z.object({
   displayName: z.string().min(2).max(80).optional(),
+  about: z.string().max(2000).optional(),
   customDomain: z.string().max(120).optional(),
   notificationsEnabled: z.boolean().optional(),
   linkedInUrl: z.string().max(300).optional(),
@@ -119,6 +120,10 @@ export const updateCurrentUser = asyncHandler(async (req, res) => {
 
   if (parsed.data.displayName !== undefined) {
     user.displayName = parsed.data.displayName;
+  }
+
+  if (parsed.data.about !== undefined) {
+    user.about = parsed.data.about;
   }
 
   if (parsed.data.customDomain !== undefined) {

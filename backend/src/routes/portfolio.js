@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { randomUUID } from "crypto";
 import { verifyFirebaseToken } from "../middlewares/auth.middleware.js";
+import { exportPortfolioToGitHub } from "../contollers/portfolio.controller.js";
 import { publishPortfolio } from "../services/portfolioService.js";
 
 const router = Router();
@@ -73,5 +74,7 @@ router.post("/publish", authMiddleware, async (req, res) => {
     });
   }
 });
+
+router.post("/github", authMiddleware, exportPortfolioToGitHub);
 
 export default router;

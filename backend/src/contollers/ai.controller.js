@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import {
   expandProjectBullet,
+  generateProfileSummary,
   generateLatexSectionEdit,
   generateTailoredLatex,
   generateTailoredResume
@@ -74,6 +75,11 @@ const expandProjectBulletSchema = z.object({
   technologies: z.string().max(300).optional().default(""),
   atsOptimized: z.boolean().optional().default(false),
   maxLines: z.number().int().min(1).max(30).optional().default(2)
+});
+
+const generateProfileSummarySchema = z.object({
+  tone: z.enum(["professional", "confident", "concise", "friendly"]).optional().default("professional"),
+  maxWords: z.number().int().min(40).max(180).optional().default(90)
 });
 
 const stripMarkdownCodeFence = (value) =>
@@ -233,6 +239,31 @@ const buildAchievementText = (achievement) => {
   const headline = [achievement.title, achievement.date].filter(Boolean).join(" | ");
   const bullets = Array.isArray(achievement.bullets) ? achievement.bullets : [];
   return [headline, ...bullets.map((bullet) => `  - ${bullet}`)].filter(Boolean).join("\n");
+};
+
+const buildProfileSummarySource = ({
+  user,
+  normalizedSkills,
+  educationLines,
+  achievements,
+  projects
+}) => {
+  const nameLine = normalizeText(user.displayName) || "Candidate";
+  const aboutLine = normalizeText(user.about);
+  const projectLines = projects.map((project) => {
+    return [project.title, project.description, (project.stack || []).join(", ")].filter(Boolean).join(" | ");
+  });
+
+  const achievementLines = achievements.map((achievement) => buildAchievementText(achievement));
+
+  return [
+    `Name: ${nameLine}`,
+    aboutLine ? `Existing Summary: ${aboutLine}` : "Existing Summary: N/A",
+    toTextBlock("Skills", normalizedSkills),
+    toTextBlock("Education", educationLines),
+    toTextBlock("Achievements", achievementLines),
+    toTextBlock("Projects", projectLines)
+  ].join("\n\n");
 };
 
 const getResumeStructuredData = async (resume) => {
@@ -630,6 +661,93 @@ export const tailorResume = asyncHandler(async (req, res) => {
   );
 });
 
+export const generateUserProfileSummary = asyncHandler(async (req, res) => {
+  const parsed = generateProfileSummarySchema.safeParse(req.body || {});
+
+  if (!parsed.success) {
+    throw new ApiError(400, "Invalid profile summary payload", parsed.error.issues);
+  }
+
+  const user = await findUserByFirebaseUid(req.auth.uid);
+  const projects = await Project.find({ owner: user._id }).sort({ updatedAt: -1 }).limit(6).lean();
+
+  const normalizedSkillBuckets = normalizeSkillBuckets({
+    skillSections: user.skillSections,
+    skillLanguages: user.skillLanguages,
+    skillFrameworks: user.skillFrameworks,
+    skillTools: user.skillTools,
+    skillLibraries: user.skillLibraries
+  });
+
+  const normalizedSkills = uniqueStrings([
+    ...normalizedSkillBuckets.skillLanguages,
+    ...normalizedSkillBuckets.skillFrameworks,
+    ...normalizedSkillBuckets.skillTools,
+    ...normalizedSkillBuckets.skillLibraries,
+    ...normalizedSkillBuckets.skillSections.flatMap((section) => section.skills || [])
+  ]);
+
+  const educationLines = Array.isArray(user.educationEntries) && user.educationEntries.length
+    ? EducationEntry.fromList(user.educationEntries)
+        .filter((entry) => !entry.isEmpty())
+        .map((entry) => entry.toSummaryLine())
+    : normalizeTextArray(user.education);
+
+  const normalizedAchievements = AchievementEntry.fromList(user.achievements)
+    .filter((item) => !item.isEmpty())
+    .map((item) => item.toObject())
+    .slice(0, 6);
+
+  const normalizedProjects = projects.map((project) => formatRecommendedProject(project));
+
+  if (!normalizedSkills.length && !educationLines.length && !normalizedAchievements.length && !normalizedProjects.length) {
+    throw new ApiError(400, "Add at least one skill, education, achievement, or project before generating summary");
+  }
+
+  const profileSource = buildProfileSummarySource({
+    user,
+    normalizedSkills,
+    educationLines,
+    achievements: normalizedAchievements,
+    projects: normalizedProjects
+  });
+
+  let profileSummary = "";
+  try {
+    profileSummary = await generateProfileSummary({
+      profileSource,
+      tone: parsed.data.tone,
+      maxWords: parsed.data.maxWords
+    });
+  } catch (error) {
+    throw new ApiError(502, error instanceof Error ? error.message : "AI provider request failed");
+  }
+
+  if (!profileSummary) {
+    throw new ApiError(502, "AI provider returned an empty profile summary");
+  }
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        profileSummary,
+        metadata: {
+          provider: "groq",
+          model: env.GROQ_MODEL,
+          counts: {
+            skills: normalizedSkills.length,
+            education: educationLines.length,
+            achievements: normalizedAchievements.length,
+            projects: normalizedProjects.length
+          }
+        }
+      },
+      "Profile summary generated successfully"
+    )
+  );
+});
+
 export const tailorResumeLatex = asyncHandler(async (req, res) => {
   const parsed = tailorLatexSchema.safeParse(req.body);
 
@@ -714,6 +832,7 @@ export const tailorResumeLatex = asyncHandler(async (req, res) => {
     ...formatResumeSnapshot(structuredResume),
     name: structuredResume.name || user.displayName || "",
     email: structuredResume.email || user.email || "",
+    summary: user.about || "",
     linkedInUrl: user.linkedInUrl || "",
     githubUrl: user.githubUrl || "",
     leetCodeId: user.leetCodeId || "",
@@ -733,6 +852,7 @@ export const tailorResumeLatex = asyncHandler(async (req, res) => {
       name: profileSnapshot.name,
       email: profileSnapshot.email,
       phone: profileSnapshot.phone,
+      summary: profileSnapshot.summary,
       linkedin: profileSnapshot.linkedInUrl,
       github: profileSnapshot.githubUrl
     },
@@ -912,6 +1032,7 @@ export const getTailorInputs = asyncHandler(async (req, res) => {
     new ApiResponse(
       200,
       {
+        profileSummary: user.about || "",
         skills: skillViews,
         skillSections: sectionViews,
         projects: rankedProjectViews,

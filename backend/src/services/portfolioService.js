@@ -3,8 +3,9 @@ import mongoose from "mongoose";
 import { User } from "../models/user.models.js";
 import { Project } from "../models/project.models.js";
 import { Portfolio } from "../models/portfolio.models.js";
-import { generatePortfolio } from "./generatePortfolio.js";
-import { attachCustomDomain, deployPortfolio } from "./deployToCloudflare.js";
+import { generatePortfolioProject } from "./generatePortfolio.js";
+import { buildViteProjectToDist } from "./portfolio-build.service.js";
+import { attachCustomDomain, deployPortfolioDist } from "./deployToCloudflare.js";
 
 const createLogger = (traceId = "") => {
   const format = (event, payload = {}) => ({
@@ -25,6 +26,22 @@ const slugify = (value) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "") || "user";
+
+const serializePreference = (preference) => {
+  if (typeof preference === "string") {
+    return preference;
+  }
+
+  if (!preference) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(preference);
+  } catch {
+    return String(preference);
+  }
+};
 
 const db = {
   users: {
@@ -58,6 +75,7 @@ const db = {
 };
 
 export const publishPortfolio = async (userId, userPreference = "", customDomain = "", options = {}) => {
+  const { user, generatedProject } = await buildPortfolioSourceBundle(userId, userPreference, options);
   const logger = createLogger(options.traceId || "");
   const startedAt = Date.now();
 
@@ -66,13 +84,6 @@ export const publishPortfolio = async (userId, userPreference = "", customDomain
     hasPreference: Boolean(String(userPreference || "").trim()),
     hasCustomDomain: Boolean(String(customDomain || "").trim())
   });
-
-  const user = await db.users.findById(userId);
-
-  if (!user) {
-    logger.error("user:not-found", { userId });
-    throw new Error("User not found");
-  }
 
   logger.info("user:loaded", {
     mongoUserId: String(user._id),
@@ -97,16 +108,22 @@ export const publishPortfolio = async (userId, userPreference = "", customDomain
     });
   }
 
-  const html = await generatePortfolio(user, userPreference || "", {
-    traceId: options.traceId || ""
-  });
-
-  logger.info("portfolio:html-generated", {
-    htmlLength: html.length,
+  logger.info("portfolio:source-generated", {
+    fileCount: Object.keys(generatedProject.filesMap || {}).length,
     projectName: record.projectName
   });
 
-  const url = await deployPortfolio(record.projectName, html, {
+  const buildOutput = await buildViteProjectToDist({
+    filesMap: generatedProject.filesMap,
+    traceId: options.traceId || ""
+  });
+
+  logger.info("portfolio:dist-built", {
+    projectName: record.projectName,
+    distFileCount: buildOutput.distFiles.length
+  });
+
+  const url = await deployPortfolioDist(record.projectName, buildOutput.distFiles, {
     traceId: options.traceId || ""
   });
 
@@ -129,7 +146,7 @@ export const publishPortfolio = async (userId, userPreference = "", customDomain
 
   await db.portfolios.update(record._id || record.id, {
     url,
-    userPreference: userPreference || "",
+    userPreference: serializePreference(userPreference),
     customDomain: customDomain || "",
     publishedAt: new Date()
   });
@@ -145,4 +162,20 @@ export const publishPortfolio = async (userId, userPreference = "", customDomain
     url,
     domainInfo
   };
+};
+
+export const buildPortfolioSourceBundle = async (userId, userPreference = "", options = {}) => {
+  const logger = createLogger(options.traceId || "");
+  const user = await db.users.findById(userId);
+
+  if (!user) {
+    logger.error("user:not-found", { userId });
+    throw new Error("User not found");
+  }
+
+  const generatedProject = await generatePortfolioProject(user, userPreference || "", {
+    traceId: options.traceId || ""
+  });
+
+  return { user, generatedProject };
 };

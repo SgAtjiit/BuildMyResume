@@ -55,7 +55,8 @@ const getContentType = (filePath) => {
 };
 
 const createAssetHash = (content, filePath) => {
-  const base64Content = Buffer.from(String(content || ""), "utf8").toString("base64");
+  const bufferContent = Buffer.isBuffer(content) ? content : Buffer.from(String(content || ""), "utf8");
+  const base64Content = bufferContent.toString("base64");
   const extension = extname(filePath || "").slice(1);
 
   return createHash("sha256")
@@ -64,21 +65,29 @@ const createAssetHash = (content, filePath) => {
     .slice(0, 32);
 };
 
-const buildAssets = (htmlContent) => {
-  const filePath = "/index.html";
-  const hash = createAssetHash(htmlContent, filePath);
+const normalizeAssetPath = (filePath) => {
+  const normalized = String(filePath || "").replace(/\\/g, "/");
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
+};
 
-  return [
-    {
+const buildAssets = (distFiles) => {
+  return (distFiles || []).map((file) => {
+    const filePath = normalizeAssetPath(file.path || "");
+    const content = Buffer.isBuffer(file.content)
+      ? file.content
+      : Buffer.from(String(file.content || ""), "utf8");
+    const hash = createAssetHash(content, filePath);
+
+    return {
       key: hash,
-      value: Buffer.from(String(htmlContent || ""), "utf8").toString("base64"),
+      value: content.toString("base64"),
       metadata: {
         contentType: getContentType(filePath)
       },
       base64: true,
       path: filePath
-    }
-  ];
+    };
+  });
 };
 
 const getHeaders = () => {
@@ -133,12 +142,12 @@ const ensureProjectExists = async (projectName, logger) => {
   }
 };
 
-export const deployPortfolio = async (projectName, htmlContent, options = {}) => {
+const deployAssets = async (projectName, assets, options = {}) => {
   const logger = createLogger(options.traceId || "");
 
   logger.info("deploy:start", {
     projectName,
-    htmlLength: String(htmlContent || "").length
+    assetCount: assets.length
   });
 
   await ensureProjectExists(projectName, logger);
@@ -160,7 +169,6 @@ export const deployPortfolio = async (projectName, htmlContent, options = {}) =>
     tokenLength: String(uploadJwt).length
   });
 
-  const assets = buildAssets(htmlContent);
   const assetHashes = assets.map((asset) => asset.key);
 
   logger.info("deploy:missing-check:start", {
@@ -262,6 +270,26 @@ export const deployPortfolio = async (projectName, htmlContent, options = {}) =>
     wrappedError.details = formatAxiosError(error);
     throw wrappedError;
   }
+};
+
+export const deployPortfolio = async (projectName, htmlContent, options = {}) => {
+  const assets = buildAssets([
+    {
+      path: "/index.html",
+      content: Buffer.from(String(htmlContent || ""), "utf8")
+    }
+  ]);
+
+  return deployAssets(projectName, assets, options);
+};
+
+export const deployPortfolioDist = async (projectName, distFiles, options = {}) => {
+  if (!Array.isArray(distFiles) || !distFiles.length) {
+    throw new Error("distFiles are required for dist deployment");
+  }
+
+  const assets = buildAssets(distFiles);
+  return deployAssets(projectName, assets, options);
 };
 
 export const attachCustomDomain = async (projectName, customDomain, options = {}) => {

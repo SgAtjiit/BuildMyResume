@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Globe, User, Bell, Plus, Trash2 } from "lucide-react";
+import { Globe, User, Bell, Plus, Trash2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -92,6 +92,7 @@ const unique = (items: string[]) => Array.from(new Set(items.map((item) => item.
 const SettingsPage = () => {
   const { backendUser, idToken, refreshProfile } = useAuth();
   const [displayName, setDisplayName] = useState("");
+  const [about, setAbout] = useState("");
   const [customDomain, setCustomDomain] = useState("");
   const [linkedInUrl, setLinkedInUrl] = useState("");
   const [githubUrl, setGithubUrl] = useState("");
@@ -102,9 +103,11 @@ const SettingsPage = () => {
   const [experienceRows, setExperienceRows] = useState<ExperienceRow[]>([emptyExperienceRow]);
   const [achievementRows, setAchievementRows] = useState<AchievementRow[]>([emptyAchievementRow]);
   const [saving, setSaving] = useState(false);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
 
   useEffect(() => {
     setDisplayName(backendUser?.displayName ?? "");
+    setAbout(backendUser?.about ?? "");
     setCustomDomain(backendUser?.customDomain ?? "");
     setLinkedInUrl(backendUser?.linkedInUrl ?? "");
     setGithubUrl(backendUser?.githubUrl ?? "");
@@ -274,37 +277,33 @@ const SettingsPage = () => {
     </motion.div>
   );
 
-  const handleSave = async () => {
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.083 }} className="rounded-xl border border-border/50 bg-card/40 p-5 mb-5">
-        <div className="flex items-center gap-3 mb-2">
-          <User className="h-4 w-4 text-primary" />
-          <h3 className="font-semibold text-foreground">Education</h3>
-        </div>
-        <p className="text-xs text-muted-foreground mb-4">Add each education as a row. Degree, college, location and end date are required; specialization and grade are optional.</p>
-        <div className="space-y-4">
-          {educationRows.map((row, index) => (
-            <div key={`education-${index}`} className="rounded-lg border border-border/40 bg-background/40 p-4 space-y-3">
-              <div className="grid gap-3 md:grid-cols-2">
-                <Input placeholder="Degree e.g. B.Tech" value={row.degree} onChange={(event) => updateEducationRow(index, { degree: event.target.value })} className="bg-background/50" />
-                <Input placeholder="Specialization e.g. CSE (optional)" value={row.specialization} onChange={(event) => updateEducationRow(index, { specialization: event.target.value })} className="bg-background/50" />
-                <Input placeholder="College / Institute" value={row.college} onChange={(event) => updateEducationRow(index, { college: event.target.value })} className="bg-background/50" />
-                <Input placeholder="Location e.g. Noida" value={row.location} onChange={(event) => updateEducationRow(index, { location: event.target.value })} className="bg-background/50" />
-                <Input placeholder="End Date e.g. July 2027" value={row.endDate} onChange={(event) => updateEducationRow(index, { endDate: event.target.value })} className="bg-background/50" />
-                <Input placeholder="Grade e.g. 8.5 CGPA or 82% (optional)" value={row.grade} onChange={(event) => updateEducationRow(index, { grade: event.target.value })} className="bg-background/50" />
-              </div>
-              <div className="flex justify-end">
-                <Button type="button" variant="ghost" size="icon" onClick={() => removeEducationRow(index)} title="Remove education">
-                  <Trash2 className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              </div>
-            </div>
-          ))}
-          <Button type="button" variant="outline" onClick={addEducationRow}>
-            <Plus className="h-4 w-4 mr-2" /> Add Education
-          </Button>
-        </div>
-      </motion.div>
+  const handleGenerateProfileSummary = async () => {
+    if (!idToken) {
+      toast.error("Please sign in again to generate summary");
+      return;
+    }
 
+    setGeneratingSummary(true);
+    try {
+      const response = await apiRequest<{ profileSummary: string }>("/ai/profile-summary", {
+        method: "POST",
+        token: idToken,
+        body: {
+          tone: "professional",
+          maxWords: 90
+        }
+      });
+
+      setAbout(response.data.profileSummary || "");
+      toast.success("AI profile summary generated. Review and save your settings.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate profile summary");
+    } finally {
+      setGeneratingSummary(false);
+    }
+  };
+
+  const handleSave = async () => {
     if (!idToken) {
       return;
     }
@@ -345,6 +344,7 @@ const SettingsPage = () => {
         token: idToken,
         body: {
           displayName,
+          about,
           customDomain,
           linkedInUrl,
           githubUrl,
@@ -542,6 +542,21 @@ const SettingsPage = () => {
             <label className="text-xs text-muted-foreground mb-1.5 block">Email</label>
             <Input value={backendUser?.email ?? ""} readOnly className="bg-background/50" />
           </div>
+        </div>
+        <div className="mt-4">
+          <div className="flex items-center justify-between gap-3 mb-1.5">
+            <label className="text-xs text-muted-foreground block">Profile Summary (About)</label>
+            <Button type="button" variant="outline" size="sm" onClick={handleGenerateProfileSummary} disabled={generatingSummary || !idToken}>
+              <Sparkles className="h-4 w-4 mr-2" />
+              {generatingSummary ? "Generating..." : "Generate with AI"}
+            </Button>
+          </div>
+          <Textarea
+            value={about}
+            onChange={(event) => setAbout(event.target.value)}
+            className="bg-background/50 min-h-[120px]"
+            placeholder="Optional: Write a concise professional summary. This can be used in generated portfolio and AI resume tailoring."
+          />
         </div>
       </motion.div>
 

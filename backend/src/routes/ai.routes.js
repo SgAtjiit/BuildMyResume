@@ -3,6 +3,7 @@ import {
 	acceptTailoredResume,
 	editTailoredResumeSection,
 	extendProjectBullet,
+	generateUserProfileSummary,
 	getTailorInputs,
 	tailorResume,
 	tailorResumeLatex
@@ -17,5 +18,6 @@ router.post("/tailor-latex", verifyFirebaseToken, tailorResumeLatex);
 router.post("/tailor-latex/edit-section", verifyFirebaseToken, editTailoredResumeSection);
 router.post("/tailor-latex/accept", verifyFirebaseToken, acceptTailoredResume);
 router.post("/project-bullet/extend", verifyFirebaseToken, extendProjectBullet);
+router.post("/profile-summary", verifyFirebaseToken, generateUserProfileSummary);
 
 export default router;

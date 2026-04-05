@@ -4,6 +4,7 @@ export type BackendUser = {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
+  about?: string;
   customDomain?: string;
   notificationsEnabled?: boolean;
   linkedInUrl?: string;

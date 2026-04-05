@@ -22,6 +22,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true
     },
+    about: {
+      type: String,
+      trim: true,
+      default: ""
+    },
     customDomain: {
       type: String,
       trim: true,
