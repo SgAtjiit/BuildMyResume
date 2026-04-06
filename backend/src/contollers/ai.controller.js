@@ -1,29 +1,23 @@
-import fs from "fs/promises";
-import path from "path";
-import { randomUUID } from "crypto";
 import { z } from "zod";
 import {
   expandProjectBullet,
   generateProfileSummary,
-  generateLatexSectionEdit,
-  generateTailoredLatex,
   generateTailoredResume
 } from "../services/groq.service.js";
-import { compileLatexToPdf } from "../services/latex-compiler.service.js";
 import {
-  extractLatexSections,
+  extractJdRequirementsWithLangChain,
+  optimizeSkillsAndProjectsWithLangChain
+} from "../services/langchain-tailor.service.js";
+import {
   extractFocusedResumeSections,
   extractNormalizedSkills,
-  extractResumeRawText,
-  extractUrls,
-  redactSensitiveInfo
+  extractResumeRawText
 } from "../services/resume-extraction.service.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { env } from "../config/env.js";
 import { Resume } from "../models/resume.models.js";
-import { TailoredResume } from "../models/tailoredResume.models.js";
 import { Project } from "../models/project.models.js";
 import { findUserByFirebaseUid } from "../services/user.service.js";
 import {
@@ -43,30 +37,20 @@ const tailorSchema = z.object({
   maxBullets: z.number().int().min(3).max(12).optional()
 });
 
-const tailorLatexSchema = z.object({
-  jobDescription: z.string().min(20, "jobDescription must be at least 20 characters"),
+const matchMasterDataSchema = z.object({
   resumeId: z.string().min(1, "resumeId is required"),
-  resumePayload: z.record(z.any()).optional(),
-  approvedSkills: z.array(z.string().trim().min(1)).max(40).optional().default([]),
-  approvedProjectIds: z.array(z.string().trim().min(1)).max(20).optional().default([]),
-  approvedExperienceIds: z.array(z.string().trim().min(1)).max(20).optional().default([]),
-  approvedAchievementIds: z.array(z.string().trim().min(1)).max(20).optional().default([]),
-  generateFromAllSaved: z.boolean().optional().default(false)
-});
-
-const tailorInputsSchema = z.object({
-  resumeId: z.string().min(1, "resumeId is required"),
-  jobDescription: z.string().optional().default("")
-});
-
-const editSectionSchema = z.object({
-  tailoredResumeId: z.string().min(1, "tailoredResumeId is required"),
-  sectionName: z.string().min(1, "sectionName is required"),
-  editInstruction: z.string().min(5, "editInstruction must be at least 5 characters")
-});
-
-const acceptTailoredSchema = z.object({
-  tailoredResumeId: z.string().min(1, "tailoredResumeId is required")
+  jobDescription: z.string().optional().default(""),
+  jdRequirements: z
+    .object({
+      primaryTechStack: z.array(z.string()).optional().default([]),
+      secondarySkills: z.array(z.string()).optional().default([]),
+      coreResponsibilities: z.array(z.string()).optional().default([]),
+      atsKeywords: z.array(z.string()).optional().default([]),
+      seniority: z.string().optional().default(""),
+      roleTitle: z.string().optional().default("")
+    })
+    .optional()
+    .default({})
 });
 
 const expandProjectBulletSchema = z.object({
@@ -81,27 +65,6 @@ const generateProfileSummarySchema = z.object({
   tone: z.enum(["professional", "confident", "concise", "friendly"]).optional().default("professional"),
   maxWords: z.number().int().min(40).max(180).optional().default(90)
 });
-
-const stripMarkdownCodeFence = (value) =>
-  value
-    .replace(/^```(?:latex)?\s*/i, "")
-    .replace(/```$/i, "")
-    .trim();
-
-const ensureLatexDocument = (latex) => {
-  if (latex.includes("\\begin{document}") && latex.includes("\\end{document}")) {
-    return latex;
-  }
-
-  return [
-    "\\documentclass[11pt]{article}",
-    "\\usepackage[margin=1in]{geometry}",
-    "\\usepackage[T1]{fontenc}",
-    "\\begin{document}",
-    latex,
-    "\\end{document}"
-  ].join("\n");
-};
 
 const safeJsonParse = (value) => {
   if (!value || typeof value !== "string") {
@@ -118,22 +81,6 @@ const safeJsonParse = (value) => {
 const normalizeText = (value) => (value || "").toString().trim();
 
 const uniqueStrings = (items = []) => Array.from(new Set(items.map((item) => normalizeText(item)).filter(Boolean)));
-
-const uniqueBy = (items = [], keyFn) => {
-  const seen = new Set();
-  const output = [];
-
-  for (const item of items) {
-    const key = keyFn(item);
-    if (!key || seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    output.push(item);
-  }
-
-  return output;
-};
 
 const collectSkillValues = (skills) => {
   if (!skills || typeof skills !== "object") {
@@ -175,18 +122,6 @@ const collectUserSkillSections = (user) => {
     .map((section) => section.toObject());
 };
 
-const collectUserExperienceValues = (user) => {
-  return ExperienceEntry.fromList(user.experience)
-    .filter((item) => !item.isEmpty())
-    .map((item, index) => formatRecommendedExperience(item.toObject(), `user-experience-${index}`));
-};
-
-const collectUserAchievementValues = (user) => {
-  return AchievementEntry.fromList(user.achievements)
-    .filter((item) => !item.isEmpty())
-    .map((item, index) => formatRecommendedAchievement(item.toObject(), `user-achievement-${index}`));
-};
-
 const collectStructuredExperienceBlocks = (user, fallbackStructuredResume) => {
   const userExperiences = ExperienceEntry.fromList(user.experience)
     .filter((item) => !item.isEmpty())
@@ -221,18 +156,6 @@ const toTextBlock = (label, items) => {
   }
 
   return [label + ":", ...items.map((item) => `- ${item}`)].join("\n");
-};
-
-const buildExperienceText = (experience) => {
-  const headline = [experience.role, experience.company, experience.location, experience.date].filter(Boolean).join(" | ");
-  const bullets = Array.isArray(experience.bullets) ? experience.bullets : [];
-  return [headline, ...bullets.map((bullet) => `  - ${bullet}`)].filter(Boolean).join("\n");
-};
-
-const buildProjectText = (project) => {
-  const headline = [project.name, project.technologies, project.date].filter(Boolean).join(" | ");
-  const bullets = Array.isArray(project.bullets) ? project.bullets : [];
-  return [headline, ...bullets.map((bullet) => `  - ${bullet}`)].filter(Boolean).join("\n");
 };
 
 const buildAchievementText = (achievement) => {
@@ -487,6 +410,189 @@ const recommendSkillsForJd = ({ normalizedSkills, projects, jdKeywords }) => {
   return [...prioritized, ...fallback].slice(0, 14);
 };
 
+const clampPercent = (value) => Math.max(0, Math.min(100, Math.round(value)));
+
+const computeKeywordCoveragePercent = (keywords = [], corpusValues = []) => {
+  const uniqueKeywords = uniqueStrings(keywords);
+  if (!uniqueKeywords.length) {
+    return 0;
+  }
+
+  const corpusTokens = new Set(tokenizeForMatching((corpusValues || []).join(" ")));
+  let matched = 0;
+
+  for (const keyword of uniqueKeywords) {
+    const keywordTokens = tokenizeForMatching(keyword);
+    if (!keywordTokens.length) {
+      continue;
+    }
+    if (keywordTokens.some((token) => corpusTokens.has(token))) {
+      matched += 1;
+    }
+  }
+
+  return (matched / uniqueKeywords.length) * 100;
+};
+
+const toSuggestedProjectTitle = (skills = []) => {
+  const normalized = uniqueStrings(skills).slice(0, 3);
+  if (!normalized.length) {
+    return "DevOps Portfolio Project";
+  }
+  return `${normalized.join(" + ")} Implementation Project`;
+};
+
+const buildMatchInsights = ({
+  jdAnalysis,
+  jdKeywords,
+  normalizedSkills,
+  selectedProjects,
+  selectedExperiences,
+  selectedAchievements,
+  optimizedSkills,
+  optimizedProjects,
+  rankedProjects
+}) => {
+  const jdSkillTargets = uniqueStrings([
+    ...(jdAnalysis?.primaryTechStack || []),
+    ...(jdAnalysis?.secondarySkills || [])
+  ]);
+
+  const sourceSkillValues = uniqueStrings([
+    ...(normalizedSkills || []),
+    ...(selectedProjects || []).flatMap((project) => project.stack || [])
+  ]);
+
+  const optimizedSkillValues = uniqueStrings([
+    ...(optimizedSkills?.finalOrdered || []),
+    ...(optimizedProjects || []).flatMap((project) => project.stack || [])
+  ]);
+
+  const projectCorpus = (selectedProjects || []).flatMap((project) => [
+    project.title,
+    project.description,
+    ...(project.stack || []),
+    ...(project.bullets || [])
+  ]);
+  const experienceCorpus = (selectedExperiences || []).flatMap((item) => [
+    item.role,
+    item.company,
+    item.location,
+    ...(item.bullets || [])
+  ]);
+  const achievementCorpus = (selectedAchievements || []).flatMap((item) => [
+    item.title,
+    ...(item.bullets || [])
+  ]);
+
+  const optimizedProjectCorpus = (optimizedProjects || []).flatMap((project) => [
+    project.title,
+    project.description,
+    ...(project.stack || []),
+    ...(project.bullets || [])
+  ]);
+
+  const currentBreakdown = {
+    skills: clampPercent(computeKeywordCoveragePercent(jdSkillTargets, sourceSkillValues)),
+    projects: clampPercent(computeKeywordCoveragePercent(jdKeywords, projectCorpus)),
+    experience: clampPercent(computeKeywordCoveragePercent(jdKeywords, experienceCorpus)),
+    achievements: clampPercent(computeKeywordCoveragePercent(jdKeywords, achievementCorpus))
+  };
+
+  const immediateProjectedBreakdown = {
+    skills: clampPercent(computeKeywordCoveragePercent(jdSkillTargets, optimizedSkillValues)),
+    projects: clampPercent(computeKeywordCoveragePercent(jdKeywords, optimizedProjectCorpus)),
+    experience: currentBreakdown.experience,
+    achievements: currentBreakdown.achievements
+  };
+
+  const weighted = (breakdown) =>
+    breakdown.skills * 0.35 + breakdown.projects * 0.35 + breakdown.experience * 0.2 + breakdown.achievements * 0.1;
+
+  const currentMatchPercent = clampPercent(weighted(currentBreakdown));
+
+  const sourceTokens = new Set(tokenizeForMatching(sourceSkillValues.join(" ")));
+  const missingSkills = jdSkillTargets.filter((skill) => {
+    const tokens = tokenizeForMatching(skill);
+    return !tokens.some((token) => sourceTokens.has(token));
+  });
+
+  const matchedKeywords = jdKeywords.filter((keyword) => {
+    const projectTokens = new Set(tokenizeForMatching(projectCorpus.join(" ")));
+    const experienceTokens = new Set(tokenizeForMatching(experienceCorpus.join(" ")));
+    return projectTokens.has(keyword) || experienceTokens.has(keyword);
+  });
+
+  const missingKeywords = jdKeywords.filter((keyword) => !matchedKeywords.includes(keyword)).slice(0, 12);
+
+  const topProjects = (rankedProjects || []).slice(0, 2);
+  const keyGapSkills = missingSkills.slice(0, 4);
+
+  const existingProjectUpgradeSuggestions = topProjects.map((project) => ({
+    projectId: project.id,
+    projectTitle: project.title,
+    suggestions: keyGapSkills.length
+      ? keyGapSkills.map((skill) => `Add a practical ${skill} module in ${project.title} with measurable deployment/testing evidence.`)
+      : ["Add stronger deployment automation and observability evidence to improve JD fit."]
+  }));
+
+  const newProjectSuggestions = [
+    {
+      title: toSuggestedProjectTitle(keyGapSkills),
+      focusSkills: keyGapSkills,
+      rationale: "Bridges missing JD skills with one end-to-end demonstrable project."
+    },
+    {
+      title: "CI/CD + Monitoring Pipeline Showcase",
+      focusSkills: uniqueStrings([
+        ...missingSkills.filter((skill) => /jenkins|ci|cd|pipeline/i.test(skill)).slice(0, 2),
+        ...missingSkills.filter((skill) => /docker|kubernetes|terraform|ansible|prometheus|grafana|linux|aws|gcp|azure/i.test(skill)).slice(0, 3)
+      ]),
+      rationale: "Demonstrates deployment, reliability, and monitoring capabilities expected in DevOps roles."
+    }
+  ].filter((item) => item.focusSkills.length);
+
+  const suggestionSkillUplift = Math.min(45, missingSkills.slice(0, 6).length * 8);
+  const suggestionProjectUplift = Math.min(35, missingKeywords.slice(0, 8).length * 4);
+
+  const suggestionProjectedBreakdown = {
+    skills: clampPercent(currentBreakdown.skills + suggestionSkillUplift),
+    projects: clampPercent(currentBreakdown.projects + suggestionProjectUplift),
+    experience: currentBreakdown.experience,
+    achievements: currentBreakdown.achievements
+  };
+
+  const projectedBreakdown = {
+    skills: Math.max(immediateProjectedBreakdown.skills, suggestionProjectedBreakdown.skills),
+    projects: Math.max(immediateProjectedBreakdown.projects, suggestionProjectedBreakdown.projects),
+    experience: Math.max(immediateProjectedBreakdown.experience, suggestionProjectedBreakdown.experience),
+    achievements: Math.max(immediateProjectedBreakdown.achievements, suggestionProjectedBreakdown.achievements)
+  };
+
+  const projectedMatchPercent = clampPercent(Math.max(currentMatchPercent, weighted(projectedBreakdown)));
+
+  return {
+    currentMatchPercent,
+    projectedMatchPercent,
+    breakdown: {
+      current: currentBreakdown,
+      projected: projectedBreakdown
+    },
+    matchedKeywords: uniqueStrings(matchedKeywords).slice(0, 12),
+    missingKeywords,
+    missingSkills: missingSkills.slice(0, 12),
+    existingProjectUpgradeSuggestions,
+    newProjectSuggestions,
+    gapSummary: [
+      `Current JD match is approximately ${currentMatchPercent}%.`,
+      missingSkills.length
+        ? `Key missing skills: ${missingSkills.slice(0, 6).join(", ")}.`
+        : "Core JD skills are present in current profile data.",
+      `If you implement suggested updates, projected match can reach about ${projectedMatchPercent}%.`
+    ]
+  };
+};
+
 const rankStructuredItems = (items, scorer) => {
   return items
     .map((item, index) => ({
@@ -533,98 +639,61 @@ const formatRecommendedAchievement = (achievement, id) => ({
   bullets: Array.isArray(achievement.bullets) ? achievement.bullets : []
 });
 
-const formatResumeSnapshot = (resumeData) => ({
-  name: resumeData.name || "",
-  phone: resumeData.phone || "",
-  email: resumeData.email || "",
-  linkedin: resumeData.linkedin || "",
-  github: resumeData.github || ""
-});
-
-const formatEducationEntry = (entry) => {
-  return EducationEntry.from(entry).toSummaryLine();
-};
-
-const buildStructuredSourceForAi = ({
-  resumePayload
-}) => {
-  return [
-    "Candidate Structured Resume Data (keep each object as exactly one resume block):",
-    JSON.stringify(resumePayload, null, 2),
-    "Rules:",
-    "1) Do not split one experience object into multiple separate entries.",
-    "2) Do not split one achievement object into multiple separate entries.",
-    "3) Keep title, company, date, location, description, and bullets together inside one block.",
-    "4) Skills may be grouped by section, but each section should remain a single block.",
-    "5) Preserve the original item grouping from the source data while improving ATS wording.",
-    "6) Prefer concise, truthful LaTeX output with one block per saved item."
-  ].join("\n\n");
-};
-
-const injectProfileIntoLatex = (latexSource, profile) => {
-  const headerLines = [
-    "\\begin{center}",
-    `{\\LARGE \\textbf{${(profile.name || "Candidate").replace(/[{}]/g, "")}}}\\\\`,
-    profile.email ? profile.email.replace(/[{}]/g, "") : "",
-    profile.linkedInUrl ? `\\\\${profile.linkedInUrl.replace(/[{}]/g, "")}` : "",
-    profile.githubUrl ? `\\\\${profile.githubUrl.replace(/[{}]/g, "")}` : "",
-    profile.leetCodeId ? `\\\\LeetCode: ${profile.leetCodeId.replace(/[{}]/g, "")}` : "",
-    profile.geeksForGeeksId ? `\\\\GeeksforGeeks: ${profile.geeksForGeeksId.replace(/[{}]/g, "")}` : "",
-    "\\end{center}",
-    "\\vspace{0.2cm}"
+const extractJdKeywordsFromRequirements = (jdRequirements = {}, fallbackJobDescription = "") => {
+  const requirementKeywords = [
+    ...(jdRequirements.primaryTechStack || []),
+    ...(jdRequirements.secondarySkills || []),
+    ...(jdRequirements.coreResponsibilities || []),
+    ...(jdRequirements.atsKeywords || []),
+    jdRequirements.roleTitle || "",
+    jdRequirements.seniority || ""
   ]
-    .filter(Boolean)
-    .join("\n");
+    .join(" ")
+    .trim();
 
-  const educationBlock = profile.education.length
-    ? ["\\section*{Education}", "\\begin{itemize}", ...profile.education.map((item) => `\\item ${item.replace(/[{}]/g, "")}`), "\\end{itemize}"]
-        .join("\n")
-    : "";
-
-  let latex = latexSource;
-  latex = latex.replace(/\\begin\{document\}/, `\\begin{document}\n${headerLines}`);
-
-  if (educationBlock && !/\\section\*?\{education\}/i.test(latex)) {
-    latex = latex.replace(/\\end\{document\}/, `${educationBlock}\n\\end{document}`);
-  }
-
-  return latex;
+  const source = requirementKeywords || fallbackJobDescription;
+  return extractJobKeywords(source);
 };
 
-const writeTailoredArtifacts = async (latexSource) => {
-  const outputDir = path.join(process.cwd(), "uploads", "tailored");
-  await fs.mkdir(outputDir, { recursive: true });
+const toSelectedProjectsForTransformer = (projects = [], selectedIds = []) => {
+  const selectedSet = new Set((selectedIds || []).map((item) => String(item || "").trim()).filter(Boolean));
+  return projects
+    .filter((project) => selectedSet.has(String(project.id || "")))
+    .map((project) => ({
+      id: String(project.id || ""),
+      title: project.title || "",
+      description: project.description || "",
+      stack: Array.isArray(project.stack) ? project.stack : [],
+      date: project.date || "",
+      githubUrl: project.githubUrl || "",
+      demoUrl: project.demoUrl || ""
+    }));
+};
 
-  const fileStem = `${Date.now()}-${randomUUID()}-tailored`;
-  const texFileName = `${fileStem}.tex`;
-  const pdfFileName = `${fileStem}.pdf`;
-  const texFilePath = path.join(outputDir, texFileName);
-  const pdfFilePath = path.join(outputDir, pdfFileName);
+const enrichOptimizedProjectsWithSource = (optimizedProjects = [], sourceProjects = []) => {
+  const sourceById = new Map(sourceProjects.map((project) => [String(project.id || ""), project]));
 
-  await fs.writeFile(texFilePath, latexSource, "utf8");
+  const normalized = optimizedProjects
+    .map((project) => {
+      const source = sourceById.get(String(project.id || ""));
+      if (!source) {
+        return null;
+      }
 
-  let compileEngine = "node-latex-pdf";
-  try {
-    compileEngine = await compileLatexToPdf(texFilePath, outputDir);
-  } catch (error) {
-    throw new ApiError(
-      500,
-      "LaTeX PDF compilation failed. Ensure MiKTeX and pdflatex are installed and configured.",
-      [error instanceof Error ? error.message : "Unknown LaTeX compilation error"]
-    );
-  }
+      return {
+        id: String(source.id || ""),
+        title: project.title || source.title || "",
+        description: project.description || source.description || "",
+        stack: Array.isArray(source.stack) ? source.stack : [],
+        date: project.date || source.date || "",
+        githubUrl: project.githubUrl || source.githubUrl || "",
+        demoUrl: project.demoUrl || source.demoUrl || "",
+        bullets: Array.isArray(project.bullets) ? project.bullets : []
+      };
+    })
+    .filter(Boolean);
 
-  try {
-    await fs.access(pdfFilePath);
-  } catch {
-    throw new ApiError(500, "PDF compilation did not produce an output file");
-  }
-
-  return {
-    texPath: `/uploads/tailored/${texFileName}`,
-    pdfPath: `/uploads/tailored/${pdfFileName}`,
-    compileEngine
-  };
+  return normalized.length ? normalized : sourceProjects;
 };
 
 export const tailorResume = asyncHandler(async (req, res) => {
@@ -748,218 +817,11 @@ export const generateUserProfileSummary = asyncHandler(async (req, res) => {
   );
 });
 
-export const tailorResumeLatex = asyncHandler(async (req, res) => {
-  const parsed = tailorLatexSchema.safeParse(req.body);
+export const matchMasterDataForJd = asyncHandler(async (req, res) => {
+  const parsed = matchMasterDataSchema.safeParse(req.body || {});
 
   if (!parsed.success) {
-    throw new ApiError(400, "Invalid AI LaTeX tailor payload", parsed.error.issues);
-  }
-
-  const user = await findUserByFirebaseUid(req.auth.uid);
-  const resume = await Resume.findOne({ _id: parsed.data.resumeId, owner: user._id });
-
-  if (!resume) {
-    throw new ApiError(404, "Resume not found");
-  }
-
-  const structuredResume = await getResumeStructuredData(resume);
-  const extractedText = await extractResumeRawText(resume);
-
-  if (!extractedText || extractedText.trim().length < 30) {
-    throw new ApiError(400, "Unable to extract enough text from selected resume for tailoring");
-  }
-
-  const extractedUrls = extractUrls(extractedText);
-  const { redactedText, findings } = redactSensitiveInfo(extractedText);
-  const focusedSections = extractFocusedResumeSections(redactedText);
-  const userSkillValues = collectUserSkillValues(user);
-  const normalizedSkills = extractNormalizedSkills(
-    [...userSkillValues, ...collectSkillValues(structuredResume.skills)].length
-      ? [...userSkillValues, ...collectSkillValues(structuredResume.skills)].join("\n")
-      : focusedSections.skillsText
-  );
-  const userProjects = await Project.find({ owner: user._id }).sort({ updatedAt: -1 }).lean();
-  const jdKeywords = extractJobKeywords(parsed.data.jobDescription);
-  const rankedProjects = rankProjectsForJd(userProjects, jdKeywords);
-  const recommendedProjects = rankedProjects.map((item) => ({
-    ...formatRecommendedProject(item.project),
-    relevanceScore: item.score
-  }));
-
-  const structuredExperiences = collectStructuredExperienceBlocks(user, structuredResume);
-  const structuredAchievements = collectStructuredAchievementBlocks(user, structuredResume);
-
-  const rankedExperiences = rankStructuredItems(structuredExperiences, (item) => scoreExperienceForJd(item, jdKeywords));
-  const rankedAchievements = rankStructuredItems(structuredAchievements, (item) => scoreAchievementForJd(item, jdKeywords));
-
-  const recommendedSkills = recommendSkillsForJd({
-    normalizedSkills,
-    projects: recommendedProjects,
-    jdKeywords
-  });
-
-  const approvedSkillSet = new Set(parsed.data.approvedSkills.map((item) => item.trim()).filter(Boolean));
-  const approvedProjectIdSet = new Set(parsed.data.approvedProjectIds.map((item) => item.trim()).filter(Boolean));
-  const approvedExperienceIdSet = new Set(parsed.data.approvedExperienceIds.map((item) => item.trim()).filter(Boolean));
-  const approvedAchievementIdSet = new Set(parsed.data.approvedAchievementIds.map((item) => item.trim()).filter(Boolean));
-
-  const selectedProjects = userProjects
-    .filter((project) => approvedProjectIdSet.has(String(project._id)))
-    .slice(0, 3)
-    .map((project) => formatRecommendedProject(project));
-
-  const selectedExperiences = rankedExperiences
-    .filter((item) => approvedExperienceIdSet.has(item.id))
-    .slice(0, 6);
-
-  const selectedAchievements = rankedAchievements
-    .filter((item) => approvedAchievementIdSet.has(item.id))
-    .slice(0, 6);
-
-  const selectedSkills = parsed.data.approvedSkills.length
-    ? Array.from(approvedSkillSet).slice(0, 20)
-    : recommendedSkills;
-
-  const selectedProjectsForAi = selectedProjects.length ? selectedProjects : recommendedProjects;
-
-  const skillViewsForComment = uniqueStrings(recommendedSkills).map((skill, index) => ({
-    id: `skill-${index}`,
-    label: skill,
-    relevanceScore: scoreSkillForJd(skill, jdKeywords)
-  }));
-
-  const profileSnapshot = {
-    ...formatResumeSnapshot(structuredResume),
-    name: structuredResume.name || user.displayName || "",
-    email: structuredResume.email || user.email || "",
-    summary: user.about || "",
-    linkedInUrl: user.linkedInUrl || "",
-    githubUrl: user.githubUrl || "",
-    leetCodeId: user.leetCodeId || "",
-    geeksForGeeksId: user.geeksForGeeksId || "",
-    education: Array.isArray(user.educationEntries) && user.educationEntries.length
-      ? EducationEntry.fromList(user.educationEntries)
-          .filter((entry) => !entry.isEmpty())
-          .map((entry) => entry.toSummaryLine())
-      : normalizeTextArray(user.education)
-  };
-
-  const frontendResumePayload = parsed.data.resumePayload && typeof parsed.data.resumePayload === "object" ? parsed.data.resumePayload : null;
-
-  const resumePayload = frontendResumePayload || {
-    jobDescription: parsed.data.jobDescription,
-    profile: {
-      name: profileSnapshot.name,
-      email: profileSnapshot.email,
-      phone: profileSnapshot.phone,
-      summary: profileSnapshot.summary,
-      linkedin: profileSnapshot.linkedInUrl,
-      github: profileSnapshot.githubUrl
-    },
-    skills: {
-      selected: selectedSkills,
-      recommended: recommendedSkills,
-      all: skillViewsForComment
-    },
-    projects: {
-      selected: selectedProjectsForAi,
-      recommended: recommendedProjects,
-      all: recommendedProjects,
-      selectedIds: selectedProjects.map((item) => item.id)
-    },
-    experiences: {
-      selected: selectedExperiences,
-      all: rankedExperiences,
-      selectedIds: selectedExperiences.map((item) => item.id)
-    },
-    achievements: {
-      selected: selectedAchievements,
-      all: rankedAchievements,
-      selectedIds: selectedAchievements.map((item) => item.id)
-    },
-    education: profileSnapshot.education
-  };
-
-  const aiSource = buildStructuredSourceForAi({ resumePayload });
-
-  const jdResumeComment = buildJdResumeComment({
-    jdKeywords,
-    skills: skillViewsForComment,
-    projects: recommendedProjects,
-    experiences: rankedExperiences,
-    achievements: rankedAchievements
-  });
-
-  let tailoredLatex = "";
-  try {
-    tailoredLatex = await generateTailoredLatex({
-      jobDescription: parsed.data.jobDescription,
-      resumeSource: aiSource
-    });
-  } catch (error) {
-    throw new ApiError(502, error instanceof Error ? error.message : "AI provider request failed");
-  }
-
-  if (!tailoredLatex) {
-    throw new ApiError(502, "AI provider returned empty LaTeX output");
-  }
-
-  const cleanedLatex = ensureLatexDocument(stripMarkdownCodeFence(tailoredLatex));
-  const latexWithProfile = injectProfileIntoLatex(cleanedLatex, profileSnapshot);
-  const artifact = await writeTailoredArtifacts(latexWithProfile);
-  const sectionNames = extractLatexSections(latexWithProfile);
-
-  const tailored = await TailoredResume.create({
-    owner: user._id,
-    sourceResume: resume._id,
-    jobDescription: parsed.data.jobDescription,
-    extractedText,
-    focusedSections,
-    normalizedSkills,
-    profileSnapshot,
-    redactedText,
-    extractedUrls,
-    sensitiveFindings: findings,
-    latexSource: latexWithProfile,
-    sectionNames,
-    pdfPath: artifact.pdfPath,
-    texPath: artifact.texPath,
-    compileEngine: artifact.compileEngine,
-    status: "draft"
-  });
-
-  return res.status(200).json(
-    new ApiResponse(
-      200,
-      {
-        tailoredResumeId: tailored._id,
-        tailoredLatex: latexWithProfile,
-        pdfPath: artifact.pdfPath,
-        texPath: artifact.texPath,
-        compileEngine: artifact.compileEngine,
-        sectionNames,
-        normalizedSkills,
-        recommendedSkills,
-        recommendedProjects,
-        recommendedExperiences: rankedExperiences,
-        recommendedAchievements: rankedAchievements,
-        selectedSkills,
-        selectedProjects: selectedProjectsForAi,
-        jdResumeComment,
-        extractedUrls,
-        redactionSummary: findings,
-        status: tailored.status
-      },
-      "Final tailored resume generated successfully"
-    )
-  );
-});
-
-export const getTailorInputs = asyncHandler(async (req, res) => {
-  const parsed = tailorInputsSchema.safeParse(req.query);
-
-  if (!parsed.success) {
-    throw new ApiError(400, "Invalid tailor input payload", parsed.error.issues);
+    throw new ApiError(400, "Invalid master-data match payload", parsed.error.issues);
   }
 
   const user = await findUserByFirebaseUid(req.auth.uid);
@@ -980,24 +842,18 @@ export const getTailorInputs = asyncHandler(async (req, res) => {
       : focusedSections.skillsText
   );
   const projects = await Project.find({ owner: user._id }).sort({ updatedAt: -1 }).lean();
-  const jdKeywords = parsed.data.jobDescription.trim() ? extractJobKeywords(parsed.data.jobDescription) : [];
-
-  const projectViews = projects.map((project) => ({
-    ...formatRecommendedProject(project)
-  }));
+  const jdKeywords = extractJdKeywordsFromRequirements(parsed.data.jdRequirements, parsed.data.jobDescription);
 
   const rankedProjectViews = rankProjectsForJd(projects, jdKeywords).map((item) => ({
-        ...formatRecommendedProject(item.project),
-        relevanceScore: item.score
-      }));
+    ...formatRecommendedProject(item.project),
+    relevanceScore: item.score
+  }));
 
   const structuredExperiences = collectStructuredExperienceBlocks(user, structuredResume);
   const structuredAchievements = collectStructuredAchievementBlocks(user, structuredResume);
 
-  const rankedExperiences = (jdKeywords.length ? rankStructuredItems(structuredExperiences, (item) => scoreExperienceForJd(item, jdKeywords)) : structuredExperiences)
-    .map((item, index) => ({ ...item, relevanceScore: item.relevanceScore ?? Math.max(structuredExperiences.length - index, 0) }));
-  const rankedAchievements = (jdKeywords.length ? rankStructuredItems(structuredAchievements, (item) => scoreAchievementForJd(item, jdKeywords)) : structuredAchievements)
-    .map((item, index) => ({ ...item, relevanceScore: item.relevanceScore ?? Math.max(structuredAchievements.length - index, 0) }));
+  const rankedExperiences = rankStructuredItems(structuredExperiences, (item) => scoreExperienceForJd(item, jdKeywords));
+  const rankedAchievements = rankStructuredItems(structuredAchievements, (item) => scoreAchievementForJd(item, jdKeywords));
 
   const skillViews = uniqueStrings(normalizedSkills).map((skill, index) => ({
     id: `skill-${index}`,
@@ -1011,11 +867,13 @@ export const getTailorInputs = asyncHandler(async (req, res) => {
         title: section.title || `Section ${sectionIndex + 1}`,
         skills: section.skills.map((skill) => {
           const existing = skillViews.find((item) => item.label.toLowerCase() === skill.toLowerCase());
-          return existing || {
-            id: `skill-${sectionIndex}-${skill}`,
-            label: skill,
-            relevanceScore: scoreSkillForJd(skill, jdKeywords)
-          };
+          return (
+            existing || {
+              id: `skill-${sectionIndex}-${skill}`,
+              label: skill,
+              relevanceScore: scoreSkillForJd(skill, jdKeywords)
+            }
+          );
         })
       }))
     : [{ id: "section-0", title: "Skills", skills: skillViews }];
@@ -1040,102 +898,7 @@ export const getTailorInputs = asyncHandler(async (req, res) => {
         achievements: rankedAchievements,
         jdResumeComment
       },
-      "Tailor input options fetched successfully"
-    )
-  );
-});
-
-export const editTailoredResumeSection = asyncHandler(async (req, res) => {
-  const parsed = editSectionSchema.safeParse(req.body);
-
-  if (!parsed.success) {
-    throw new ApiError(400, "Invalid edit payload", parsed.error.issues);
-  }
-
-  const user = await findUserByFirebaseUid(req.auth.uid);
-  const tailored = await TailoredResume.findOne({ _id: parsed.data.tailoredResumeId, owner: user._id });
-
-  if (!tailored) {
-    throw new ApiError(404, "Tailored resume not found");
-  }
-
-  let editedLatex = "";
-  try {
-    editedLatex = await generateLatexSectionEdit({
-      latexSource: tailored.latexSource,
-      sectionName: parsed.data.sectionName,
-      editInstruction: parsed.data.editInstruction,
-      jobDescription: tailored.jobDescription
-    });
-  } catch (error) {
-    throw new ApiError(502, error instanceof Error ? error.message : "AI provider request failed");
-  }
-
-  if (!editedLatex) {
-    throw new ApiError(502, "AI provider returned empty LaTeX output");
-  }
-
-  const cleanedLatex = ensureLatexDocument(stripMarkdownCodeFence(editedLatex));
-  const artifact = await writeTailoredArtifacts(cleanedLatex);
-  const sectionNames = extractLatexSections(cleanedLatex);
-
-  tailored.latexSource = cleanedLatex;
-  tailored.pdfPath = artifact.pdfPath;
-  tailored.texPath = artifact.texPath;
-  tailored.compileEngine = artifact.compileEngine;
-  tailored.sectionNames = sectionNames;
-  tailored.edits.push({
-    sectionName: parsed.data.sectionName,
-    instruction: parsed.data.editInstruction,
-    latexSource: cleanedLatex,
-    pdfPath: artifact.pdfPath
-  });
-
-  await tailored.save();
-
-  return res.status(200).json(
-    new ApiResponse(
-      200,
-      {
-        tailoredResumeId: tailored._id,
-        tailoredLatex: tailored.latexSource,
-        pdfPath: tailored.pdfPath,
-        texPath: tailored.texPath,
-        compileEngine: tailored.compileEngine,
-        sectionNames: tailored.sectionNames
-      },
-      "Tailored section updated successfully"
-    )
-  );
-});
-
-export const acceptTailoredResume = asyncHandler(async (req, res) => {
-  const parsed = acceptTailoredSchema.safeParse(req.body);
-
-  if (!parsed.success) {
-    throw new ApiError(400, "Invalid accept payload", parsed.error.issues);
-  }
-
-  const user = await findUserByFirebaseUid(req.auth.uid);
-  const tailored = await TailoredResume.findOneAndUpdate(
-    { _id: parsed.data.tailoredResumeId, owner: user._id },
-    { status: "accepted" },
-    { new: true }
-  );
-
-  if (!tailored) {
-    throw new ApiError(404, "Tailored resume not found");
-  }
-
-  return res.status(200).json(
-    new ApiResponse(
-      200,
-      {
-        tailoredResumeId: tailored._id,
-        status: tailored.status,
-        pdfPath: tailored.pdfPath
-      },
-      "Tailored resume accepted"
+      "Master data ranked successfully"
     )
   );
 });
@@ -1168,6 +931,207 @@ export const extendProjectBullet = asyncHandler(async (req, res) => {
         improvedBullet
       },
       "Project bullet expanded successfully"
+    )
+  );
+});
+
+// ============================================
+// Stage 1: Analyze Job Description
+// ============================================
+const analyzeJdSchema = z.object({
+  jobDescription: z.string().min(20, "jobDescription must be at least 20 characters")
+});
+
+export const analyzeJobDescriptionEndpoint = asyncHandler(async (req, res) => {
+  const parsed = analyzeJdSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    throw new ApiError(400, "Invalid JD analysis payload", parsed.error.issues);
+  }
+
+  let jdAnalysis = null;
+  try {
+    jdAnalysis = await extractJdRequirementsWithLangChain({
+      jobDescription: parsed.data.jobDescription
+    });
+  } catch (error) {
+    throw new ApiError(502, error instanceof Error ? error.message : "JD analysis failed");
+  }
+
+  if (!jdAnalysis) {
+    throw new ApiError(502, "AI provider returned empty JD analysis");
+  }
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        jdAnalysis
+      },
+      "Job description analyzed successfully"
+    )
+  );
+});
+
+// ============================================
+// Stage 2: Tailor with JD Analysis
+// ============================================
+const tailorWithJdAnalysisSchema = z.object({
+  jobDescription: z.string().min(20, "jobDescription must be at least 20 characters"),
+  jdAnalysis: z.record(z.any()).optional().default({}),
+  resumeId: z.string().min(1, "resumeId is required").optional(),
+  resumePayload: z.record(z.any()).optional(),
+  tone: z.enum(["professional", "confident", "concise"]).optional().default("professional"),
+  approvedSkills: z.array(z.string().trim().min(1)).max(40).optional().default([]),
+  approvedProjectIds: z.array(z.string().trim().min(1)).max(20).optional().default([]),
+  approvedExperienceIds: z.array(z.string().trim().min(1)).max(20).optional().default([]),
+  approvedAchievementIds: z.array(z.string().trim().min(1)).max(20).optional().default([])
+});
+
+export const tailorResumeWithTwoStage = asyncHandler(async (req, res) => {
+  const parsed = tailorWithJdAnalysisSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    throw new ApiError(400, "Invalid two-stage tailor payload", parsed.error.issues);
+  }
+
+  const user = await findUserByFirebaseUid(req.auth.uid);
+  const resume = parsed.data.resumeId
+    ? await Resume.findOne({ _id: parsed.data.resumeId, owner: user._id })
+    : null;
+
+  if (parsed.data.resumeId && !resume) {
+    throw new ApiError(404, "Resume not found");
+  }
+
+  const structuredResume = resume
+    ? await getResumeStructuredData(resume)
+    : {
+        name: normalizeText(user.displayName),
+        email: normalizeText(user.email),
+        phone: "",
+        linkedin: normalizeText(user.linkedInUrl),
+        github: normalizeText(user.githubUrl),
+        education: [],
+        experience: [],
+        projects: [],
+        achievements: [],
+        skills: {}
+      };
+
+  const extractedText = resume ? await extractResumeRawText(resume) : "";
+  const focusedSections = extractFocusedResumeSections(extractedText || "");
+  const userSkillValues = collectUserSkillValues(user);
+  const jdAnalysis = Object.keys(parsed.data.jdAnalysis || {}).length
+    ? parsed.data.jdAnalysis
+    : await extractJdRequirementsWithLangChain({ jobDescription: parsed.data.jobDescription });
+  const normalizedSkills = extractNormalizedSkills(
+    [...userSkillValues, ...collectSkillValues(structuredResume.skills)].length
+      ? [...userSkillValues, ...collectSkillValues(structuredResume.skills)].join("\n")
+      : focusedSections.skillsText
+  );
+
+  const userProjects = await Project.find({ owner: user._id }).sort({ updatedAt: -1 }).lean();
+  const jdKeywords = extractJdKeywordsFromRequirements(jdAnalysis, parsed.data.jobDescription);
+
+  const rankedProjects = rankProjectsForJd(userProjects, jdKeywords).map((item) => ({
+    ...formatRecommendedProject(item.project),
+    relevanceScore: item.score
+  }));
+
+  const recommendedSkills = recommendSkillsForJd({
+    normalizedSkills,
+    projects: rankedProjects,
+    jdKeywords
+  });
+
+  const approvedSkillSet = new Set(parsed.data.approvedSkills.map((item) => item.trim()).filter(Boolean));
+  const autoSkills = uniqueStrings(
+    rankedProjects
+      .flatMap((project) => project.stack || [])
+      .concat(recommendedSkills)
+      .slice(0, 20)
+  );
+
+  const selectedSkills = parsed.data.approvedSkills.length
+    ? Array.from(approvedSkillSet).slice(0, 20)
+    : (autoSkills.length ? autoSkills : recommendedSkills);
+
+  const selectedProjects = toSelectedProjectsForTransformer(rankedProjects, parsed.data.approvedProjectIds);
+  const candidateProjectsForTransformer = selectedProjects.length ? selectedProjects : rankedProjects;
+
+  const structuredExperiences = collectStructuredExperienceBlocks(user, structuredResume);
+  const structuredAchievements = collectStructuredAchievementBlocks(user, structuredResume);
+  const rankedExperiences = rankStructuredItems(structuredExperiences, (item) => scoreExperienceForJd(item, jdKeywords));
+  const rankedAchievements = rankStructuredItems(structuredAchievements, (item) => scoreAchievementForJd(item, jdKeywords));
+
+  const approvedExperienceIdSet = new Set(parsed.data.approvedExperienceIds.map((item) => item.trim()).filter(Boolean));
+  const approvedAchievementIdSet = new Set(parsed.data.approvedAchievementIds.map((item) => item.trim()).filter(Boolean));
+
+  const selectedExperiences = approvedExperienceIdSet.size
+    ? rankedExperiences.filter((item) => approvedExperienceIdSet.has(item.id)).slice(0, 6)
+    : rankedExperiences.slice(0, 3);
+
+  const selectedAchievements = approvedAchievementIdSet.size
+    ? rankedAchievements.filter((item) => approvedAchievementIdSet.has(item.id)).slice(0, 6)
+    : rankedAchievements.slice(0, 3);
+
+  let optimized = null;
+  try {
+    optimized = await optimizeSkillsAndProjectsWithLangChain({
+      jdRequirements: jdAnalysis,
+      selectedSkills,
+      selectedProjects: candidateProjectsForTransformer
+    });
+  } catch (error) {
+    throw new ApiError(502, error instanceof Error ? error.message : "JSON tailoring failed");
+  }
+
+  if (!optimized) {
+    throw new ApiError(502, "AI provider returned empty optimized JSON");
+  }
+
+  const fallbackOrderedSkills = uniqueStrings(selectedSkills);
+  const optimizedSkills = {
+    primary: uniqueStrings(optimized.optimizedSkills?.primary || []),
+    secondary: uniqueStrings(optimized.optimizedSkills?.secondary || []),
+    additional: uniqueStrings(optimized.optimizedSkills?.additional || []),
+    removed: uniqueStrings(optimized.optimizedSkills?.removed || []),
+    finalOrdered: uniqueStrings(optimized.optimizedSkills?.finalOrdered || fallbackOrderedSkills)
+  };
+
+  const optimizedProjects = enrichOptimizedProjectsWithSource(
+    optimized.optimizedProjects || [],
+    candidateProjectsForTransformer
+  ).slice(0, 3);
+
+  const matchInsights = buildMatchInsights({
+    jdAnalysis,
+    jdKeywords,
+    normalizedSkills,
+    selectedProjects: candidateProjectsForTransformer,
+    selectedExperiences,
+    selectedAchievements,
+    optimizedSkills,
+    optimizedProjects,
+    rankedProjects
+  });
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        tailoredJson: {
+          optimizedSkills,
+          optimizedProjects,
+          selectedExperiences,
+          selectedAchievements,
+          summaryNotes: uniqueStrings(optimized.summaryNotes || []),
+          matchInsights
+        },
+        jdAnalysisUsed: jdAnalysis
+      },
+      "Resume tailored successfully using JD analyze->match->transform pipeline"
     )
   );
 });

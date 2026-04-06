@@ -27,6 +27,7 @@ type ResumeItem = {
   content: string;
   originalFileName?: string;
   filePath?: string;
+  createdAt: string;
   updatedAt: string;
 };
 
@@ -284,6 +285,7 @@ const Resumes = () => {
   const [uploading, setUploading] = useState(false);
   const [showTitleDialog, setShowTitleDialog] = useState(false);
   const [resumeTitle, setResumeTitle] = useState("");
+  const [saveTitleMode, setSaveTitleMode] = useState<"upload" | "jake" | null>(null);
   const [expandedResumeId, setExpandedResumeId] = useState<string | null>(null);
 
   const [showBuilder, setShowBuilder] = useState(false);
@@ -370,6 +372,7 @@ const Resumes = () => {
   const handleFileSelected = (file: File) => {
     setSelectedFile(file);
     setResumeTitle(file.name.replace(/\.[^.]+$/, ""));
+    setSaveTitleMode("upload");
     setShowTitleDialog(true);
   };
 
@@ -394,11 +397,56 @@ const Resumes = () => {
       setSelectedFile(null);
       setResumeTitle("");
       setShowTitleDialog(false);
+      setSaveTitleMode(null);
       await fetchResumes();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to upload resume");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleJakeSaveWithTitle = async () => {
+    if (!idToken || !resumeTitle.trim()) {
+      return;
+    }
+
+    const snapshot = applyStepData();
+    const previewConfig = getPreviewConfig(snapshot);
+
+    try {
+      setSavingBuilderResume(true);
+      const title = resumeTitle.trim();
+      const pdfBlob = await generateResumePdfBlob(snapshot, previewConfig);
+      const pdfFile = new File([pdfBlob], `${title}.pdf`, { type: "application/pdf" });
+      const sections = [
+        snapshot.professionalSummary?.trim(),
+        (snapshot.education?.length ?? 0) > 0,
+        (snapshot.experience?.length ?? 0) > 0,
+        (snapshot.projects?.length ?? 0) > 0,
+        (snapshot.achievements?.length ?? 0) > 0,
+        getRenderableSkillLines(snapshot).length > 0
+      ].filter(Boolean).length;
+      const formData = new FormData();
+      formData.append("title", title);
+      formData.append("sections", String(sections));
+      formData.append("resumeFile", pdfFile);
+
+      await apiRequest<{ resume: ResumeItem }>("/resumes", {
+        method: "POST",
+        token: idToken,
+        body: formData
+      });
+      toast.success("Jake resume saved as PDF");
+      setShowBuilder(false);
+      setShowTitleDialog(false);
+      setSaveTitleMode(null);
+      setResumeTitle("");
+      await fetchResumes();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save resume");
+    } finally {
+      setSavingBuilderResume(false);
     }
   };
 
@@ -491,6 +539,7 @@ const Resumes = () => {
     setResumeData((current) => ({
       ...current,
       name: backendUser?.displayName ?? "",
+      phone: backendUser?.phone ?? "",
       email: backendUser?.email ?? "",
       linkedin: backendUser?.linkedInUrl ?? "",
       github: backendUser?.githubUrl ?? "",
@@ -1006,44 +1055,10 @@ const Resumes = () => {
   };
 
   const saveJakeResume = async () => {
-    if (!idToken) {
-      return;
-    }
-
     const snapshot = applyStepData();
-    const previewConfig = getPreviewConfig(snapshot);
-
-    try {
-      setSavingBuilderResume(true);
-      const title = `${snapshot.name || "Candidate"} - Jake Resume`;
-      const pdfBlob = await generateResumePdfBlob(snapshot, previewConfig);
-      const pdfFile = new File([pdfBlob], `${title}.pdf`, { type: "application/pdf" });
-      const sections = [
-        snapshot.professionalSummary?.trim(),
-        (snapshot.education?.length ?? 0) > 0,
-        (snapshot.experience?.length ?? 0) > 0,
-        (snapshot.projects?.length ?? 0) > 0,
-        (snapshot.achievements?.length ?? 0) > 0,
-        getRenderableSkillLines(snapshot).length > 0
-      ].filter(Boolean).length;
-      const formData = new FormData();
-      formData.append("title", title);
-      formData.append("sections", String(sections));
-      formData.append("resumeFile", pdfFile);
-
-      await apiRequest<{ resume: ResumeItem }>("/resumes", {
-        method: "POST",
-        token: idToken,
-        body: formData
-      });
-      toast.success("Jake resume saved as PDF");
-      setShowBuilder(false);
-      await fetchResumes();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save resume");
-    } finally {
-      setSavingBuilderResume(false);
-    }
+    setResumeTitle(`${snapshot.name || "Candidate"} - Jake Resume`);
+    setSaveTitleMode("jake");
+    setShowTitleDialog(true);
   };
 
   const updateRow = <T,>(setter: React.Dispatch<React.SetStateAction<T[]>>, index: number, patch: Partial<T>) => {
@@ -1313,7 +1328,9 @@ const Resumes = () => {
                 </div>
                 <div>
                   <p className="font-medium text-foreground">{r.title}</p>
-                  <p className="text-xs text-muted-foreground">{r.format} · {r.sections} sections · {new Date(r.updatedAt).toLocaleDateString()}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {r.format} · {r.sections} sections · Created {new Date(r.createdAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                  </p>
                   {r.originalFileName ? <p className="text-[11px] text-muted-foreground/80">File: {r.originalFileName}</p> : null}
                 </div>
               </div>
@@ -1396,10 +1413,18 @@ const Resumes = () => {
         ))}
       </div>
 
-      <Dialog open={showTitleDialog} onOpenChange={setShowTitleDialog}>
+      <Dialog
+        open={showTitleDialog}
+        onOpenChange={(open) => {
+          setShowTitleDialog(open);
+          if (!open) {
+            setSaveTitleMode(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Resume Title</DialogTitle>
+            <DialogTitle>{saveTitleMode === "jake" ? "Save Jake Resume" : "Resume Title"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <Input
@@ -1409,17 +1434,37 @@ const Resumes = () => {
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
-                  void handleUploadWithTitle();
+                  if (saveTitleMode === "jake") {
+                    void handleJakeSaveWithTitle();
+                  } else {
+                    void handleUploadWithTitle();
+                  }
                 }
               }}
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowTitleDialog(false)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowTitleDialog(false);
+                setSaveTitleMode(null);
+              }}
+            >
               Cancel
             </Button>
-            <Button onClick={() => void handleUploadWithTitle()} disabled={uploading || !resumeTitle.trim()}>
-              {uploading ? "Uploading..." : "Upload"}
+            <Button
+              onClick={() => {
+                if (saveTitleMode === "jake") {
+                  void handleJakeSaveWithTitle();
+                  return;
+                }
+
+                void handleUploadWithTitle();
+              }}
+              disabled={uploading || savingBuilderResume || !resumeTitle.trim()}
+            >
+              {saveTitleMode === "jake" ? (savingBuilderResume ? "Saving..." : "Save Resume") : uploading ? "Uploading..." : "Upload"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -29,7 +29,7 @@ const DashboardSidebar = () => {
         <div className="h-7 w-7 rounded-lg bg-primary/20 flex items-center justify-center">
           <FileText className="h-3.5 w-3.5 text-primary" />
         </div>
-        <span className="font-semibold text-foreground">ResumeSubnet</span>
+        <span className="font-semibold text-foreground">BuildMyResume</span>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1">
         {links.map((link) => {

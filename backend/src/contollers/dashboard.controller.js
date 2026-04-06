@@ -133,6 +133,7 @@ export const getFullProfileSnapshot = asyncHandler(async (req, res) => {
       userId: user._id,
       firebaseUid: user.firebaseUid,
       name: user.displayName || "",
+      phone: user.phone || "",
       email: user.email || "",
       photoURL: user.photoURL || "",
       createdAt: user.createdAt,

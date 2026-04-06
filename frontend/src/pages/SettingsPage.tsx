@@ -92,6 +92,7 @@ const unique = (items: string[]) => Array.from(new Set(items.map((item) => item.
 const SettingsPage = () => {
   const { backendUser, idToken, refreshProfile } = useAuth();
   const [displayName, setDisplayName] = useState("");
+  const [phone, setPhone] = useState("");
   const [about, setAbout] = useState("");
   const [customDomain, setCustomDomain] = useState("");
   const [linkedInUrl, setLinkedInUrl] = useState("");
@@ -107,6 +108,7 @@ const SettingsPage = () => {
 
   useEffect(() => {
     setDisplayName(backendUser?.displayName ?? "");
+    setPhone(backendUser?.phone ?? "");
     setAbout(backendUser?.about ?? "");
     setCustomDomain(backendUser?.customDomain ?? "");
     setLinkedInUrl(backendUser?.linkedInUrl ?? "");
@@ -344,6 +346,7 @@ const SettingsPage = () => {
         token: idToken,
         body: {
           displayName,
+          phone,
           about,
           customDomain,
           linkedInUrl,
@@ -537,6 +540,10 @@ const SettingsPage = () => {
           <div>
             <label className="text-xs text-muted-foreground mb-1.5 block">Full Name</label>
             <Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="bg-background/50" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1.5 block">Phone</label>
+            <Input value={phone} onChange={(event) => setPhone(event.target.value)} className="bg-background/50" placeholder="+91 98765 43210" />
           </div>
           <div>
             <label className="text-xs text-muted-foreground mb-1.5 block">Email</label>

@@ -103,18 +103,6 @@ export const redactSensitiveInfo = (text) => {
   };
 };
 
-export const extractLatexSections = (latexSource) => {
-  const sectionRegex = /\\section\*?\{([^}]+)\}/g;
-  const names = [];
-  let match = sectionRegex.exec(latexSource);
-  while (match) {
-    names.push(match[1].trim());
-    match = sectionRegex.exec(latexSource);
-  }
-
-  return Array.from(new Set(names));
-};
-
 const normalizeSkill = (value) =>
   value
     .replace(/^[\-•*]+\s*/, "")

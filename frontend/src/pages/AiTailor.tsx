@@ -1,9 +1,17 @@
 import { motion } from "framer-motion";
-import { Sparkles, FileDown, Copy, CheckCircle2, ExternalLink } from "lucide-react";
+import { Sparkles, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/use-auth";
 import { apiRequest } from "@/lib/api";
@@ -18,6 +26,7 @@ type ResumeItem = {
   content: string;
   format: "PDF" | "DOCX" | "TXT" | "TEX" | "IMAGE";
   originalFileName?: string;
+  createdAt: string;
   updatedAt: string;
 };
 
@@ -27,6 +36,7 @@ type ResumeSaveResponse = {
 
 type BackendUserShape = {
   displayName?: string;
+  phone?: string;
   email?: string;
   linkedInUrl?: string;
   githubUrl?: string;
@@ -48,44 +58,85 @@ type BackendUserShape = {
   achievements?: { title?: string; date?: string; bullets?: string[] }[];
 };
 
-type TailorLatexResponse = {
-  tailoredResumeId: string;
-  tailoredLatex: string;
-  pdfPath: string;
-  texPath: string;
-  compileEngine: string;
-  sectionNames: string[];
-  normalizedSkills: string[];
-  recommendedSkills: string[];
-  recommendedProjects: {
-    id: string;
+type JdRequirements = {
+  primaryTechStack: string[];
+  secondarySkills: string[];
+  coreResponsibilities: string[];
+  atsKeywords: string[];
+  seniority: string;
+  roleTitle: string;
+};
+
+type MatchInsights = {
+  currentMatchPercent: number;
+  projectedMatchPercent: number;
+  breakdown: {
+    current: {
+      skills: number;
+      projects: number;
+      experience: number;
+      achievements: number;
+    };
+    projected: {
+      skills: number;
+      projects: number;
+      experience: number;
+      achievements: number;
+    };
+  };
+  matchedKeywords: string[];
+  missingKeywords: string[];
+  missingSkills: string[];
+  existingProjectUpgradeSuggestions: {
+    projectId: string;
+    projectTitle: string;
+    suggestions: string[];
+  }[];
+  newProjectSuggestions: {
     title: string;
-    description: string;
-    stack: string[];
-    githubUrl: string;
-    demoUrl: string;
-    relevanceScore?: number;
+    focusSkills: string[];
+    rationale: string;
   }[];
-  recommendedExperiences: {
-    id: string;
-    role: string;
-    company: string;
-    location: string;
-    date: string;
-    bullets: string[];
-    relevanceScore?: number;
-  }[];
-  recommendedAchievements: {
-    id: string;
-    title: string;
-    date: string;
-    bullets: string[];
-    relevanceScore?: number;
-  }[];
-  jdResumeComment?: string[];
-  extractedUrls: string[];
-  redactionSummary: string[];
-  status: "draft" | "accepted";
+  gapSummary: string[];
+};
+
+type TailorTwoStageResponse = {
+  tailoredJson: {
+    optimizedSkills: {
+      primary: string[];
+      secondary: string[];
+      additional: string[];
+      removed: string[];
+      finalOrdered: string[];
+    };
+    optimizedProjects: {
+      id: string;
+      title: string;
+      description: string;
+      stack: string[];
+      date: string;
+      githubUrl: string;
+      demoUrl: string;
+      bullets: string[];
+    }[];
+    selectedExperiences: {
+      id: string;
+      role: string;
+      company: string;
+      location: string;
+      date: string;
+      bullets: string[];
+    }[];
+    selectedAchievements: {
+      id: string;
+      title: string;
+      date: string;
+      bullets: string[];
+    }[];
+    summaryNotes: string[];
+    matchInsights?: MatchInsights;
+  };
+  jdAnalysisUsed: JdRequirements;
 };
 
 type TailorInputOptions = {
@@ -138,6 +189,29 @@ const parseBullets = (value?: string) =>
     .split(/\r?\n/)
     .map((item) => item.trim())
     .filter(Boolean);
+
+const cleanResumeText = (value: string) =>
+  value
+    .replace(/^\s*[-*•]\s*/, "")
+    .replace(/^\s*(situation|task|action|result)\s*:\s*/i, "")
+    .replace(/^\s*(s|t|a|r)\s*:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const compactBullets = (items: string[], maxCount = 3) =>
+  uniqueStrings(items.map(cleanResumeText).filter(Boolean)).slice(0, maxCount);
+
+const compactProjectTechnologies = (technologies: string) =>
+  uniqueStrings(
+    technologies
+      .split(/[,/|]/)
+      .map((item) => cleanResumeText(item))
+      .filter(Boolean)
+  ).slice(0, 4).join(", ");
+
+const compactProjectTitle = (title: string) => cleanResumeText(title).replace(/\s*\|\s*$/, "");
+
+const compactProjectDescription = (description: string) => cleanResumeText(description).replace(/\.$/, "");
 
 const ensurePdfY = (doc: jsPDF, y: number) => {
   if (y > doc.internal.pageSize.getHeight() - 20) {
@@ -260,25 +334,25 @@ const generateResumePdfBlob = async (data: ResumeData) => {
   };
 
   const writeSectionTitle = (title: string) => {
-    y += 8;
+    y += 10;
     y = ensurePdfY(doc, y);
     doc.setFont(pdfSerifFontFamily, "bold");
-    doc.setFontSize(12);
+    doc.setFontSize(11.5);
     doc.text(title.toUpperCase(), left, y);
-    y += 7;
+    y += 8;
     y = ensurePdfY(doc, y);
     doc.setLineWidth(0.8);
     doc.line(left, y, left + contentWidth, y);
-    y += 11;
+    y += 12;
     doc.setFont(pdfSerifFontFamily, "normal");
-    doc.setFontSize(10.5);
+    doc.setFontSize(10);
   };
 
   doc.setFont(pdfSerifFontFamily, "bold");
   doc.setFontSize(22);
   y = ensurePdfY(doc, y);
   doc.text(data.name || "Candidate", centerX, y, { align: "center" });
-  y += 24;
+  y += 22;
 
   doc.setFont(pdfSerifFontFamily, "normal");
   doc.setFontSize(10);
@@ -298,13 +372,13 @@ const generateResumePdfBlob = async (data: ResumeData) => {
     writeSectionTitle("Education");
     data.education.forEach((item) => {
       doc.setFont(pdfSerifFontFamily, "bold");
-      writeLeftRight(item.school || "", item.location || "", 14);
+      writeLeftRight(item.school || "", item.location || "", 13);
 
       doc.setFont(pdfSerifFontFamily, "italic");
-      writeLeftRight([item.degree, item.grade].filter(Boolean).join(" - "), item.date || "", 14);
+      writeLeftRight([item.degree, item.grade].filter(Boolean).join(" - "), item.date || "", 13);
 
       doc.setFont(pdfSerifFontFamily, "normal");
-      y += 3;
+      y += 2;
     });
   }
 
@@ -312,17 +386,17 @@ const generateResumePdfBlob = async (data: ResumeData) => {
     writeSectionTitle("Experience");
     data.experience.forEach((item) => {
       doc.setFont(pdfSerifFontFamily, "bold");
-      doc.setFontSize(10.8);
-      writeLeftRight(item.role || "", item.date || "", 14);
+      doc.setFontSize(10.5);
+      writeLeftRight(item.role || "", item.date || "", 13);
 
       doc.setFont(pdfSerifFontFamily, "italic");
-      doc.setFontSize(10.2);
-      writeLeftRight(item.company || "", item.location || "", 13);
+      doc.setFontSize(10);
+      writeLeftRight(item.company || "", item.location || "", 12);
 
       doc.setFont(pdfSerifFontFamily, "normal");
-      doc.setFontSize(10);
-      item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, 13));
-      y += 2;
+      doc.setFontSize(9.7);
+      item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, 12));
+      y += 1;
     });
   }
 
@@ -330,28 +404,18 @@ const generateResumePdfBlob = async (data: ResumeData) => {
     writeSectionTitle("Projects");
     data.projects.forEach((item) => {
       doc.setFont(pdfSerifFontFamily, "bold");
-      doc.setFontSize(10.8);
-      y = ensurePdfY(doc, y);
-      const nameText = item.name || "";
-      doc.text(nameText, left, y);
+      doc.setFontSize(10.5);
+      writeLeftRight(item.name || "", item.date || "", 13);
 
       if (item.technologies) {
         doc.setFont(pdfSerifFontFamily, "italic");
-        doc.setFontSize(10.2);
-        const techText = ` | ${item.technologies}`;
-        doc.text(techText, left + doc.getTextWidth(nameText) + 2, y);
+        doc.setFontSize(10);
+        writeWrapped(item.technologies, left, contentWidth, 11);
       }
-
-      if (item.date) {
-        doc.setFont(pdfSerifFontFamily, "italic");
-        doc.setFontSize(10.2);
-        doc.text(item.date, left + contentWidth, y, { align: "right" });
-      }
-      y += 13;
 
       doc.setFont(pdfSerifFontFamily, "normal");
-      doc.setFontSize(10);
-      item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, 13));
+      doc.setFontSize(9.7);
+      item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, 12));
       y += 2;
     });
   }
@@ -360,12 +424,12 @@ const generateResumePdfBlob = async (data: ResumeData) => {
     writeSectionTitle("Achievements");
     data.achievements.forEach((item) => {
       doc.setFont(pdfSerifFontFamily, "bold");
-      doc.setFontSize(10.8);
-      writeLeftRight(item.title || "", item.date || "", 14);
+      doc.setFontSize(10.5);
+      writeLeftRight(item.title || "", item.date || "", 13);
       doc.setFont(pdfSerifFontFamily, "normal");
-      doc.setFontSize(10);
-      item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, 13));
-      y += 2;
+      doc.setFontSize(9.7);
+      item.bullets.forEach((bullet) => writeWrapped(`- ${bullet}`, left + 14, contentWidth - 14, 12));
+      y += 1;
     });
   }
 
@@ -373,9 +437,9 @@ const generateResumePdfBlob = async (data: ResumeData) => {
   if (skillLines.length) {
     writeSectionTitle("Skills");
     doc.setFont(pdfSerifFontFamily, "normal");
-    doc.setFontSize(10);
+    doc.setFontSize(9.7);
     skillLines.forEach((line) => {
-      writeWrapped(line.label ? `${line.label}: ${line.value}` : line.value, left, contentWidth, 13);
+      writeWrapped(line.label ? `${line.label}: ${line.value}` : line.value, left, contentWidth, 12);
     });
     doc.setFont(pdfSerifFontFamily, "normal");
   }
@@ -386,7 +450,7 @@ const generateResumePdfBlob = async (data: ResumeData) => {
 
 const buildBaseResumeData = (backendUser: BackendUserShape | null): ResumeData => ({
   name: backendUser?.displayName || "",
-  phone: "",
+  phone: backendUser?.phone || "",
   email: backendUser?.email || "",
   linkedin: backendUser?.linkedInUrl || "",
   github: backendUser?.githubUrl || "",
@@ -430,47 +494,6 @@ const buildBaseResumeData = (backendUser: BackendUserShape | null): ResumeData =
   }))
 });
 
-const mapSelectedProjects = (projects: TailorInputOptions["projects"], selectedIds: string[]): Project[] => {
-  const selectedSet = new Set(selectedIds);
-  return projects
-    .filter((project) => selectedSet.has(project.id))
-    .map((project) => ({
-      name: project.title,
-      technologies: project.stack.join(", "),
-      date: "",
-      bullets: [project.description].filter(Boolean)
-    }));
-};
-
-const mapSelectedExperiences = (experiences: TailorInputOptions["experiences"], selectedIds: string[]): Experience[] => {
-  const selectedSet = new Set(selectedIds);
-  return experiences
-    .filter((experience) => selectedSet.has(experience.id))
-    .map((experience) => ({
-      role: experience.role,
-      company: experience.company,
-      location: experience.location,
-      date: experience.date,
-      bullets: experience.bullets
-    }));
-};
-
-const mapSelectedAchievements = (achievements: TailorInputOptions["achievements"], selectedIds: string[]): Achievement[] => {
-  const selectedSet = new Set(selectedIds);
-  return achievements
-    .filter((achievement) => selectedSet.has(achievement.id))
-    .map((achievement) => ({
-      title: achievement.title,
-      date: achievement.date,
-      bullets: achievement.bullets
-    }));
-};
-
-const mapSelectedSkills = (sections: NonNullable<TailorInputOptions["skillSections"]>, selectedSkills: string[]) => {
-  const selectedSet = new Set(selectedSkills);
-  return sections.flatMap((section) => section.skills.filter((skill) => selectedSet.has(skill.label)).map((skill) => skill.label));
-};
-
 const groupBlockFragments = <T extends { id: string; role?: string; title?: string; company?: string; location?: string; date?: string; bullets?: string[] }>(items: T[]) => {
   const grouped: Array<{ id: string; head: T | null; bullets: string[] }> = [];
 
@@ -509,30 +532,21 @@ const AiTailor = () => {
   const [generatedPreview, setGeneratedPreview] = useState<ResumeData | null>(null);
   const [normalizedSkills, setNormalizedSkills] = useState<string[]>([]);
   const [recommendedSkills, setRecommendedSkills] = useState<string[]>([]);
-  const [recommendedProjects, setRecommendedProjects] = useState<TailorLatexResponse["recommendedProjects"]>([]);
-  const [recommendedExperiences, setRecommendedExperiences] = useState<TailorLatexResponse["recommendedExperiences"]>([]);
-  const [recommendedAchievements, setRecommendedAchievements] = useState<TailorLatexResponse["recommendedAchievements"]>([]);
+  const [recommendedProjects, setRecommendedProjects] = useState<TailorInputOptions["projects"]>([]);
+  const [recommendedExperiences, setRecommendedExperiences] = useState<TailorInputOptions["experiences"]>([]);
+  const [recommendedAchievements, setRecommendedAchievements] = useState<TailorInputOptions["achievements"]>([]);
+  const [matchInsights, setMatchInsights] = useState<MatchInsights | null>(null);
   const [extractedUrls, setExtractedUrls] = useState<string[]>([]);
   const [redactionSummary, setRedactionSummary] = useState<string[]>([]);
-  const [availableSkills, setAvailableSkills] = useState<TailorInputOptions["skills"]>([]);
-  const [availableSkillSections, setAvailableSkillSections] = useState<NonNullable<TailorInputOptions["skillSections"]>>([]);
-  const [availableProjects, setAvailableProjects] = useState<TailorInputOptions["projects"]>([]);
-  const [availableExperiences, setAvailableExperiences] = useState<TailorInputOptions["experiences"]>([]);
-  const [availableAchievements, setAvailableAchievements] = useState<TailorInputOptions["achievements"]>([]);
-  const [approvedSkills, setApprovedSkills] = useState<string[]>([]);
-  const [approvedProjectIds, setApprovedProjectIds] = useState<string[]>([]);
-  const [approvedExperienceIds, setApprovedExperienceIds] = useState<string[]>([]);
-  const [approvedAchievementIds, setApprovedAchievementIds] = useState<string[]>([]);
   const [jdResumeComment, setJdResumeComment] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingResumes, setLoadingResumes] = useState(true);
-  const [loadingInputs, setLoadingInputs] = useState(false);
   const [savingFinal, setSavingFinal] = useState(false);
+  const [showSaveTitleDialog, setShowSaveTitleDialog] = useState(false);
+  const [saveResumeTitle, setSaveResumeTitle] = useState("");
 
   const selectedResume = useMemo(() => resumes[0], [resumes]);
   const baseResumeData = useMemo(() => buildBaseResumeData((backendUser as BackendUserShape | null) || null), [backendUser]);
-  const groupedAvailableExperiences = useMemo(() => groupBlockFragments(availableExperiences), [availableExperiences]);
-  const groupedAvailableAchievements = useMemo(() => groupBlockFragments(availableAchievements), [availableAchievements]);
   const groupedRecommendedExperiences = useMemo(() => groupBlockFragments(recommendedExperiences), [recommendedExperiences]);
   const groupedRecommendedAchievements = useMemo(() => groupBlockFragments(recommendedAchievements), [recommendedAchievements]);
 
@@ -553,65 +567,6 @@ const AiTailor = () => {
     }
   }, [idToken]);
 
-  const fetchTailorInputs = useCallback(async (resumeId: string, jobDescription: string) => {
-    if (!idToken || !resumeId) {
-      setAvailableSkills([]);
-      setAvailableSkillSections([]);
-      setAvailableProjects([]);
-      setAvailableExperiences([]);
-      setAvailableAchievements([]);
-      setApprovedSkills([]);
-      setApprovedProjectIds([]);
-      setApprovedExperienceIds([]);
-      setApprovedAchievementIds([]);
-      setJdResumeComment([]);
-      return;
-    }
-
-    setLoadingInputs(true);
-    try {
-      const response = await apiRequest<TailorInputOptions>(
-        `/ai/tailor-inputs?resumeId=${resumeId}&jobDescription=${encodeURIComponent(jobDescription || "")}`,
-        {
-        token: idToken
-        }
-      );
-      const skills = response.data.skills || [];
-      const skillSections = response.data.skillSections || [];
-      const projects = response.data.projects || [];
-      const experiences = response.data.experiences || [];
-      const achievements = response.data.achievements || [];
-      const allSectionSkills = uniqueStrings(skillSections.flatMap((section) => section.skills.map((skill) => skill.label)));
-      const recommendedSectionSkills = uniqueStrings(
-        skillSections.flatMap((section) => section.skills.filter((skill) => (skill.relevanceScore || 0) > 0).map((skill) => skill.label))
-      );
-      setAvailableSkills(skills);
-      setAvailableSkillSections(skillSections);
-      setAvailableProjects(projects);
-      setAvailableExperiences(experiences);
-      setAvailableAchievements(achievements);
-      setApprovedSkills((recommendedSectionSkills.length ? recommendedSectionSkills : allSectionSkills).slice(0, 20));
-      setApprovedProjectIds(projects.filter((item) => (item.relevanceScore || 0) > 0).slice(0, 3).map((item) => item.id));
-      setApprovedExperienceIds(experiences.filter((item) => (item.relevanceScore || 0) > 0).slice(0, 3).map((item) => item.id));
-      setApprovedAchievementIds(achievements.filter((item) => (item.relevanceScore || 0) > 0).slice(0, 3).map((item) => item.id));
-      setJdResumeComment(response.data.jdResumeComment || []);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load saved items");
-      setAvailableSkills([]);
-      setAvailableSkillSections([]);
-      setAvailableProjects([]);
-      setAvailableExperiences([]);
-      setAvailableAchievements([]);
-      setApprovedSkills([]);
-      setApprovedProjectIds([]);
-      setApprovedExperienceIds([]);
-      setApprovedAchievementIds([]);
-      setJdResumeComment([]);
-    } finally {
-      setLoadingInputs(false);
-    }
-  }, [idToken]);
-
   useEffect(() => {
     void fetchResumes();
   }, [fetchResumes]);
@@ -623,36 +578,10 @@ const AiTailor = () => {
     setRecommendedProjects([]);
     setRecommendedExperiences([]);
     setRecommendedAchievements([]);
+    setMatchInsights(null);
     setExtractedUrls([]);
     setRedactionSummary([]);
     setJdResumeComment([]);
-  };
-
-  const handleAnalyze = async () => {
-    if (!idToken) {
-      toast.error("Sign in before analyzing saved info.");
-      return;
-    }
-
-    if (!jd.trim()) {
-      toast.error("Please paste a job description first.");
-      return;
-    }
-
-    if (!selectedResume) {
-      toast.error("Please select a resume first.");
-      return;
-    }
-
-    setLoadingInputs(true);
-    try {
-      await fetchTailorInputs(selectedResume._id, jd);
-      toast.success("Saved items ranked for this JD. Unselect anything you do not want.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to analyze saved items");
-    } finally {
-      setLoadingInputs(false);
-    }
   };
 
   const handleGenerate = async () => {
@@ -666,18 +595,49 @@ const AiTailor = () => {
       return;
     }
 
-    if (!selectedResume) {
-      toast.error("Please select a resume first.");
-      return;
-    }
-
     setLoading(true);
 
     try {
-      const selectedProjectItems = mapSelectedProjects(availableProjects, approvedProjectIds);
-      const selectedExperienceItems = mapSelectedExperiences(availableExperiences, approvedExperienceIds);
-      const selectedAchievementItems = mapSelectedAchievements(availableAchievements, approvedAchievementIds);
-      const selectedSkillItems = mapSelectedSkills(availableSkillSections, approvedSkills);
+      const response = await apiRequest<TailorTwoStageResponse>("/ai/tailor-two-stage", {
+        method: "POST",
+        token: idToken,
+        body: {
+          jobDescription: jd,
+          ...(selectedResume ? { resumeId: selectedResume._id } : {})
+        }
+      });
+
+      const tailored = response.data.tailoredJson;
+      const insights = tailored.matchInsights || null;
+      const optimizedSkillsOrdered = uniqueStrings(tailored.optimizedSkills?.finalOrdered || []);
+      const optimizedProjects = tailored.optimizedProjects || [];
+      const optimizedExperiences = tailored.selectedExperiences || [];
+      const optimizedAchievements = tailored.selectedAchievements || [];
+
+      const selectedSkillItems = optimizedSkillsOrdered.length
+        ? optimizedSkillsOrdered
+        : baseResumeData.skills?.languages || [];
+
+      const selectedProjectItems: Project[] = optimizedProjects.map((project) => ({
+        name: compactProjectTitle(project.title),
+        technologies: compactProjectTechnologies((project.stack || []).join(", ")),
+        date: project.date || "",
+        bullets: compactBullets(project.bullets && project.bullets.length ? project.bullets : [project.description], 3)
+      }));
+
+      const selectedExperienceItems: Experience[] = optimizedExperiences.map((experience) => ({
+        role: experience.role,
+        company: experience.company,
+        location: experience.location,
+        date: experience.date,
+        bullets: compactBullets(experience.bullets || [], 3)
+      }));
+
+      const selectedAchievementItems: Achievement[] = optimizedAchievements.map((achievement) => ({
+        title: achievement.title,
+        date: achievement.date,
+        bullets: compactBullets(achievement.bullets || [], 3)
+      }));
 
       const nextPreview: ResumeData = {
         ...baseResumeData,
@@ -694,18 +654,46 @@ const AiTailor = () => {
       };
 
       setGeneratedPreview(nextPreview);
+      setMatchInsights(insights);
+      setNormalizedSkills(optimizedSkillsOrdered);
       setRecommendedSkills(uniqueStrings(selectedSkillItems));
-      setRecommendedProjects(availableProjects.filter((project) => approvedProjectIds.includes(project.id)));
-      setRecommendedExperiences(availableExperiences.filter((experience) => approvedExperienceIds.includes(experience.id)));
-      setRecommendedAchievements(availableAchievements.filter((achievement) => approvedAchievementIds.includes(achievement.id)));
-      setJdResumeComment([
-        "Saved profile fields were kept intact.",
-        "Only the selected AI-approved skills, projects, experience, and achievements were merged into the preview.",
-        "Generate Preview now uses the JakeResumePreview pipeline instead of LaTeX/PDF rendering.",
-        "You can still unselect or select any saved item before previewing.",
-        "Education and personal info are pulled from your saved profile as-is."
-      ]);
-      toast.success("Preview generated from saved data and selected AI items.");
+      setRecommendedProjects(
+        optimizedProjects.map((project) => ({
+          id: project.id,
+          title: compactProjectTitle(project.title),
+          description: compactProjectDescription(project.description),
+          stack: uniqueStrings((project.stack || []).map(cleanResumeText)),
+          githubUrl: project.githubUrl || "",
+          demoUrl: project.demoUrl || "",
+          relevanceScore: 1
+        }))
+      );
+      setRecommendedExperiences(
+        optimizedExperiences.map((experience) => ({
+          ...experience,
+          bullets: compactBullets(experience.bullets || [], 3),
+          relevanceScore: 1
+        }))
+      );
+      setRecommendedAchievements(
+        optimizedAchievements.map((achievement) => ({
+          ...achievement,
+          bullets: compactBullets(achievement.bullets || [], 3),
+          relevanceScore: 1
+        }))
+      );
+      setJdResumeComment(
+        [
+          ...(insights?.gapSummary || []),
+          ...(tailored.summaryNotes || [])
+        ].length
+          ? [
+              ...(insights?.gapSummary || []),
+              ...(tailored.summaryNotes || [])
+            ]
+          : ["AI transformer auto-optimized projects and skills against JD requirements."]
+      );
+      toast.success("Final preview generated through Jake pipeline using auto-tailored data.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to generate preview");
     } finally {
@@ -714,7 +702,7 @@ const AiTailor = () => {
   };
 
   const handleSaveFinalResume = async () => {
-    if (!idToken || !generatedPreview) {
+    if (!idToken || !generatedPreview || !saveResumeTitle.trim()) {
       return;
     }
 
@@ -728,8 +716,7 @@ const AiTailor = () => {
         (generatedPreview.skills?.languages?.length || generatedPreview.skills?.frameworks?.length || generatedPreview.skills?.tools?.length || generatedPreview.skills?.libraries?.length) ? 1 : 0
       ].reduce((sum, value) => sum + value, 0);
 
-      const titleBase = generatedPreview.name?.trim() || backendUser?.displayName?.trim() || "Candidate";
-      const title = `${titleBase} - AI Tailored Jake Resume`;
+      const title = saveResumeTitle.trim();
 
       const pdfBlob = await generateResumePdfBlob(generatedPreview);
       const pdfFile = new File([pdfBlob], `${title}.pdf`, { type: "application/pdf" });
@@ -745,6 +732,8 @@ const AiTailor = () => {
       });
 
       toast.success("Final tailored resume saved as PDF. It is now visible in Resumes.");
+      setShowSaveTitleDialog(false);
+      setSaveResumeTitle("");
       await fetchResumes();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save final resume");
@@ -753,28 +742,20 @@ const AiTailor = () => {
     }
   };
 
+  const openSaveTitleDialog = () => {
+    const titleBase = generatedPreview?.name?.trim() || backendUser?.displayName?.trim() || "Candidate";
+    setSaveResumeTitle(`${titleBase} - AI Tailored Jake Resume`);
+    setShowSaveTitleDialog(true);
+  };
+
   const isGenerated = Boolean(generatedPreview);
-
-  const toggleSkill = (skill: string) => {
-    setApprovedSkills((current) =>
-      current.includes(skill) ? current.filter((item) => item !== skill) : [...current, skill]
-    );
-  };
-
-  const toggleProject = (projectId: string) => {
-    setApprovedProjectIds((current) =>
-      current.includes(projectId)
-        ? current.filter((item) => item !== projectId)
-        : [...current, projectId]
-    );
-  };
 
   return (
     <div className="p-8 max-w-5xl">
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="text-2xl font-bold text-foreground mb-1">AI Resume Tailor</h1>
         <p className="text-muted-foreground mb-8">
-          Saved profile data is combined with your selected AI recommendations and rendered through the Jake preview pipeline.
+          One-click tailoring: JD + your master profile data are auto-processed and rendered through the Jake preview pipeline.
         </p>
       </motion.div>
 
@@ -798,200 +779,22 @@ const AiTailor = () => {
                   ? "Loading latest resume..."
                   : selectedResume
                     ? `Using latest resume: ${selectedResume.title}`
-                    : "No resume available"}
+                    : "No resume found - using master profile data"}
               </div>
-              <Button
-                variant="outline"
-                onClick={handleAnalyze}
-                disabled={!jd.trim() || loadingInputs || loadingResumes || resumes.length === 0}
-              >
-                {loadingInputs ? "Analyzing..." : "Analyze Saved Info"}
-              </Button>
               <Button
                 variant="hero"
                 onClick={handleGenerate}
-                disabled={!jd.trim() || loading || loadingResumes || loadingInputs || resumes.length === 0}
+                disabled={!jd.trim() || loading || loadingResumes}
               >
-                <Sparkles className="h-4 w-4 mr-2" /> {loading ? "Generating..." : "Generate Preview"}
+                <Sparkles className="h-4 w-4 mr-2" /> {loading ? "Generating..." : "Generate Final Preview"}
               </Button>
             </div>
 
-            <div className="mt-4 space-y-3 rounded-lg border border-border/40 bg-background/30 p-3">
+            <div className="mt-4 rounded-lg border border-border/40 bg-background/30 p-3">
               <p className="text-xs text-muted-foreground">
-                Saved info ranked by JD. Unselect anything you do not want in the final resume.
+                No analyze or manual selection step is required. Click Generate Final Preview and AI will auto-analyze JD,
+                auto-rank your saved master data, tailor it, and render final preview.
               </p>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-muted-foreground">Skills</p>
-                  <p className="text-[11px] text-muted-foreground">{approvedSkills.length} selected</p>
-                </div>
-                <div className="space-y-2">
-                  {loadingInputs ? (
-                    <Badge variant="secondary" className="text-xs">Loading...</Badge>
-                  ) : availableSkillSections.length ? (
-                    availableSkillSections.map((section) => (
-                      <div key={section.id} className="rounded-md border border-border/40 bg-background/40 p-2">
-                        <p className="text-[11px] font-medium text-muted-foreground mb-1">{section.title}</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {section.skills.map((skill) => {
-                            const active = approvedSkills.includes(skill.label);
-                            const recommended = (skill.relevanceScore || 0) > 0;
-                            return (
-                              <button
-                                key={skill.id}
-                                type="button"
-                                onClick={() => toggleSkill(skill.label)}
-                                className={`text-xs px-2 py-1 rounded border ${active ? "bg-primary/15 border-primary/40 text-primary" : "bg-background/60 border-border/50 text-muted-foreground"}`}
-                                title={recommended ? "AI Recommended" : "Manual Select"}
-                              >
-                                {skill.label}
-                                {recommended ? " *" : ""}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <Badge variant="secondary" className="text-xs">No saved skills found</Badge>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-muted-foreground">Projects</p>
-                  <p className="text-[11px] text-muted-foreground">{approvedProjectIds.length} selected</p>
-                </div>
-                <div className="space-y-2">
-                  {availableProjects.length ? (
-                    availableProjects.map((project) => {
-                      const active = approvedProjectIds.includes(project.id);
-                      return (
-                        <button
-                          key={project.id}
-                          type="button"
-                          onClick={() => toggleProject(project.id)}
-                          className={`w-full text-left rounded-md border p-2 ${active ? "bg-primary/10 border-primary/40" : "bg-background/60 border-border/50"}`}
-                        >
-                          <p className="text-sm font-medium text-foreground">{project.title}{(project.relevanceScore || 0) > 0 ? " *" : ""}</p>
-                          {project.stack.length ? (
-                            <p className="text-[11px] text-muted-foreground">{project.stack.join(", ")}</p>
-                          ) : null}
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No saved projects found</p>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-muted-foreground">Experience</p>
-                  <p className="text-[11px] text-muted-foreground">{approvedExperienceIds.length} selected</p>
-                </div>
-                <div className="space-y-2">
-                  {groupedAvailableExperiences.length ? (
-                    groupedAvailableExperiences.map((experienceGroup) => {
-                      const experience = experienceGroup.head;
-                      const active = experience ? approvedExperienceIds.includes(experience.id) : false;
-                      return (
-                        <button
-                          key={experienceGroup.id}
-                          type="button"
-                          onClick={() => {
-                            if (!experience) {
-                              return;
-                            }
-
-                            setApprovedExperienceIds((current) =>
-                              current.includes(experience.id)
-                                ? current.filter((item) => item !== experience.id)
-                                : [...current, experience.id]
-                            );
-                          }}
-                          className={`w-full text-left rounded-md border p-2 ${active ? "bg-primary/10 border-primary/40" : "bg-background/60 border-border/50"}`}
-                        >
-                          <p className="text-sm font-medium text-foreground">{experience?.role || experience?.company || "Experience item"}{(experience?.relevanceScore || 0) > 0 ? " *" : ""}</p>
-                          <p className="text-[11px] text-muted-foreground">{[experience?.company, experience?.location, experience?.date].filter(Boolean).join(" • ")}</p>
-                          {experienceGroup.bullets.length > 0 ? (
-                            <ul className="list-disc ml-4 mt-1 space-y-1">
-                              {experienceGroup.bullets.slice(0, 4).map((bullet, index) => (
-                                <li key={`${experienceGroup.id}-bullet-${index}`} className="text-[11px] text-foreground/90">
-                                  {bullet}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : null}
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No saved experience found</p>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-muted-foreground">Achievements</p>
-                  <p className="text-[11px] text-muted-foreground">{approvedAchievementIds.length} selected</p>
-                </div>
-                <div className="space-y-2">
-                  {groupedAvailableAchievements.length ? (
-                    groupedAvailableAchievements.map((achievementGroup) => {
-                      const achievement = achievementGroup.head;
-                      const active = achievement ? approvedAchievementIds.includes(achievement.id) : false;
-                      return (
-                        <button
-                          key={achievementGroup.id}
-                          type="button"
-                          onClick={() => {
-                            if (!achievement) {
-                              return;
-                            }
-
-                            setApprovedAchievementIds((current) =>
-                              current.includes(achievement.id)
-                                ? current.filter((item) => item !== achievement.id)
-                                : [...current, achievement.id]
-                            );
-                          }}
-                          className={`w-full text-left rounded-md border p-2 ${active ? "bg-primary/10 border-primary/40" : "bg-background/60 border-border/50"}`}
-                        >
-                          <p className="text-sm font-medium text-foreground">{achievement?.title || "Achievement item"}{(achievement?.relevanceScore || 0) > 0 ? " *" : ""}</p>
-                          <p className="text-[11px] text-muted-foreground">{achievement?.date || "No date"}</p>
-                          {achievementGroup.bullets.length > 0 ? (
-                            <ul className="list-disc ml-4 mt-1 space-y-1">
-                              {achievementGroup.bullets.slice(0, 4).map((bullet, index) => (
-                                <li key={`${achievementGroup.id}-bullet-${index}`} className="text-[11px] text-foreground/90">
-                                  {bullet}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : null}
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No saved achievements found</p>
-                  )}
-                </div>
-              </div>
-
-              {jdResumeComment.length > 0 ? (
-                <div className="rounded-md border border-border/40 bg-background/40 p-2">
-                  <p className="text-xs text-muted-foreground mb-1">AI JD vs Resume Comment</p>
-                  <ul className="list-disc ml-4 space-y-1">
-                    {jdResumeComment.slice(0, 5).map((line, index) => (
-                      <li key={`jd-comment-${index}`} className="text-xs text-foreground/90">{line}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
             </div>
           </div>
 
@@ -999,9 +802,19 @@ const AiTailor = () => {
             <div className="rounded-xl border border-border/50 bg-card/40 p-5 mt-4 space-y-3">
               <h3 className="font-semibold text-foreground">JD Recommendations Applied</h3>
               <p className="text-xs text-muted-foreground">
-                AI Tailor used JD-relevant skills and your top 3 matching projects to prepare this final edited resume.
+                AI Tailor used JD-relevant skills and your top matching projects to prepare this final edited resume.
               </p>
               <div className="space-y-3">
+                {matchInsights ? (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">JD Match Score</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge variant="secondary" className="text-xs">Current: {matchInsights.currentMatchPercent}%</Badge>
+                      <Badge variant="secondary" className="text-xs">Projected After Suggestions: {matchInsights.projectedMatchPercent}%</Badge>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div>
                   <p className="text-xs text-muted-foreground mb-2">Recommended Skills (JD Match)</p>
                   <div className="flex flex-wrap gap-1.5">
@@ -1019,7 +832,7 @@ const AiTailor = () => {
                   </div>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground mb-2">Top 3 JD-Matched Projects</p>
+                  <p className="text-xs text-muted-foreground mb-2">Top JD-Matched Projects</p>
                   <div className="space-y-2">
                     {recommendedProjects.length > 0 ? (
                       recommendedProjects.map((project) => (
@@ -1079,6 +892,54 @@ const AiTailor = () => {
                     )}
                   </div>
                 </div>
+
+                {matchInsights?.missingSkills?.length ? (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Missing JD Skills</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {matchInsights.missingSkills.slice(0, 10).map((skill) => (
+                        <Badge key={`missing-skill-${skill}`} variant="outline" className="text-xs">
+                          {skill}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {matchInsights?.existingProjectUpgradeSuggestions?.length ? (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">How To Improve Existing Projects</p>
+                    <div className="space-y-2">
+                      {matchInsights.existingProjectUpgradeSuggestions.map((item) => (
+                        <div key={`upgrade-${item.projectId}`} className="rounded-md border border-border/40 bg-background/40 p-2">
+                          <p className="text-sm font-medium text-foreground">{item.projectTitle}</p>
+                          <ul className="list-disc ml-4 mt-1 space-y-1">
+                            {item.suggestions.slice(0, 3).map((line, idx) => (
+                              <li key={`upgrade-line-${item.projectId}-${idx}`} className="text-xs text-foreground/90">{line}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {matchInsights?.newProjectSuggestions?.length ? (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Suggested New Projects For JD Fit</p>
+                    <div className="space-y-2">
+                      {matchInsights.newProjectSuggestions.map((item, idx) => (
+                        <div key={`new-project-suggestion-${idx}`} className="rounded-md border border-border/40 bg-background/40 p-2">
+                          <p className="text-sm font-medium text-foreground">{item.title}</p>
+                          <p className="text-[11px] text-muted-foreground mt-1">{item.rationale}</p>
+                          {item.focusSkills.length ? (
+                            <p className="text-[11px] text-foreground/90 mt-1">Focus skills: {item.focusSkills.join(", ")}</p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -1097,10 +958,10 @@ const AiTailor = () => {
                     {selectedResume?.title || "Resume"}
                   </Badge>
                   <Badge variant="secondary" className="text-xs">
-                    {approvedSkills.length} skills selected
+                    {recommendedSkills.length} skills optimized
                   </Badge>
                   <Badge variant="secondary" className="text-xs">
-                    {approvedProjectIds.length} projects selected
+                    {recommendedProjects.length} projects optimized
                   </Badge>
                 </div>
 
@@ -1114,10 +975,10 @@ const AiTailor = () => {
                 <div className="rounded-lg bg-background/50 border border-border/30 p-3 mb-4">
                   <p className="text-xs text-muted-foreground mb-2">Selection Summary</p>
                   <div className="flex flex-wrap gap-1.5">
-                    <Badge variant="secondary" className="text-xs">{approvedSkills.length} skills</Badge>
-                    <Badge variant="secondary" className="text-xs">{approvedProjectIds.length} projects</Badge>
-                    <Badge variant="secondary" className="text-xs">{approvedExperienceIds.length} experience</Badge>
-                    <Badge variant="secondary" className="text-xs">{approvedAchievementIds.length} achievements</Badge>
+                    <Badge variant="secondary" className="text-xs">{recommendedSkills.length} skills</Badge>
+                    <Badge variant="secondary" className="text-xs">{recommendedProjects.length} projects</Badge>
+                    <Badge variant="secondary" className="text-xs">{recommendedExperiences.length} experience</Badge>
+                    <Badge variant="secondary" className="text-xs">{recommendedAchievements.length} achievements</Badge>
                   </div>
                 </div>
 
@@ -1133,7 +994,7 @@ const AiTailor = () => {
                 ) : null}
 
                 <div className="flex gap-2">
-                  <Button variant="hero-outline" size="sm" onClick={handleSaveFinalResume} disabled={savingFinal}>
+                  <Button variant="hero-outline" size="sm" onClick={openSaveTitleDialog} disabled={savingFinal}>
                     {savingFinal ? "Saving..." : "Save Final"}
                   </Button>
                 </div>
@@ -1144,7 +1005,7 @@ const AiTailor = () => {
                   <Sparkles className="h-8 w-8 text-muted-foreground/30 mx-auto mb-3" />
                   <p className="text-sm text-muted-foreground">Generate to preview your resume in Jake format</p>
                   <p className="text-xs text-muted-foreground/60 mt-1">
-                    This uses saved profile data plus your selected AI recommendations.
+                    This uses your saved profile data and auto-tailored AI recommendations.
                   </p>
                 </div>
               </div>
@@ -1152,6 +1013,45 @@ const AiTailor = () => {
           </div>
         </motion.div>
       </div>
+
+      <Dialog
+        open={showSaveTitleDialog}
+        onOpenChange={(open) => {
+          setShowSaveTitleDialog(open);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Final Resume</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Input
+              value={saveResumeTitle}
+              onChange={(event) => setSaveResumeTitle(event.target.value)}
+              placeholder="Enter a title for this saved resume"
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void handleSaveFinalResume();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowSaveTitleDialog(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={() => void handleSaveFinalResume()} disabled={savingFinal || !saveResumeTitle.trim()}>
+              {savingFinal ? "Saving..." : "Save Resume"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -78,13 +78,13 @@ const JakeResumePreview = ({ data, config }: { data: ResumeData; config?: Previe
       <h2 className={headingClass} style={{ fontSize: `${12 * headerScale}pt` }}>Projects</h2>
       {projectItems.map((proj, index) => (
         <div key={`${proj.name}-${index}`} className="mb-2.5">
-          <div className="flex justify-between items-start gap-3">
-            <span className="text-[10pt]">
-              <strong className="font-semibold text-[10.8pt]">{proj.name}</strong>
-              {proj.technologies ? <span className="italic"> | {proj.technologies}</span> : null}
-            </span>
+          <div className="flex justify-between gap-3">
+            <span className="font-semibold text-[10.8pt] leading-tight">{proj.name}</span>
             <span className="text-[10.2pt] italic whitespace-nowrap">{proj.date}</span>
           </div>
+          {proj.technologies ? (
+            <div className="text-[10.2pt] italic leading-tight mt-0.5 break-words">{proj.technologies}</div>
+          ) : null}
           <ul className="list-disc ml-5 text-[10pt] mt-1 space-y-[1px] marker:text-black">
             {proj.bullets.map((bullet, i) => (
               <li key={`${proj.name}-${i}`}>{bullet}</li>

@@ -19,6 +19,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@langchain/core": "^1.1.0",
+    "@langchain/groq": "^1.2.0",
     "axios": "^1.13.1",
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
@@ -36,7 +38,7 @@
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
     "nanoid": "^5.1.6",
-    "node-latex-pdf": "^0.0.2",
+    "langchain": "^1.2.0",
     "pdf-parse": "^2.4.5",
     "tesseract.js": "^7.0.0",
     "zod": "^3.25.76"

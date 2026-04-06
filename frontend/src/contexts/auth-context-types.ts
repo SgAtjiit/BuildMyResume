@@ -3,6 +3,7 @@ export type BackendUser = {
   firebaseUid: string;
   email: string | null;
   displayName: string | null;
+  phone?: string;
   photoURL: string | null;
   about?: string;
   customDomain?: string;
