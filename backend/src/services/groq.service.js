@@ -137,3 +137,58 @@ export const generateProfileSummary = async ({
   }
 };
 
+export const generateAtsDescriptionBullets = async ({
+  prompt,
+  context = "",
+  tone = "professional",
+  count = 3
+}) => {
+  const safeCount = Number.isFinite(count) ? Math.min(Math.max(Math.trunc(count), 1), 6) : 3;
+
+  const systemPrompt = [
+    "You are an expert ATS resume writing assistant.",
+    "Generate concise, impact-focused bullet points that are truthful and technically grounded.",
+    `Preferred tone: ${tone}.`,
+    "Return plain text only with exactly one bullet per line.",
+    `Return exactly ${safeCount} bullet points.`,
+    "Do not include numbering, markdown headings, or explanations."
+  ].join(" ");
+
+  const userPrompt = [
+    "Primary instruction:",
+    prompt,
+    "",
+    "Context (optional):",
+    context || "N/A",
+    "",
+    "Constraints:",
+    "1) Prefer ATS-friendly action verbs and technical clarity.",
+    "2) Keep each bullet to 14-30 words.",
+    "3) Do not fabricate tools, metrics, or outcomes not implied by context.",
+    `4) Output exactly ${safeCount} lines.`
+  ].join("\n");
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: env.GROQ_MODEL,
+      temperature: 0.35,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
+    });
+
+    const raw = completion.choices?.[0]?.message?.content?.trim() || "";
+    const bullets = raw
+      .split(/\r?\n+/)
+      .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
+      .filter(Boolean)
+      .slice(0, safeCount);
+
+    return bullets;
+  } catch (error) {
+    const providerMessage = error instanceof Error ? error.message : "Unknown Groq API error";
+    throw new Error(`Groq request failed: ${providerMessage}`);
+  }
+};
+

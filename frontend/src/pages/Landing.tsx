@@ -4,7 +4,11 @@ import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/use-auth";
+import ThemeToggle from "@/components/ThemeToggle";
 
+// ==========================================
+// CONSTANTS & ANIMATIONS
+// ==========================================
 const features = [
   { icon: FileText, title: "Smart Resume Parsing", desc: "Upload PDF/DOCX and we auto-parse skills, experience, education & projects." },
   { icon: Sparkles, title: "AI-Powered Tailoring", desc: "Paste a job description and get a perfectly matched resume in seconds." },
@@ -15,10 +19,13 @@ const features = [
 ];
 
 const fadeUp = {
-  hidden: { opacity: 0, y: 20 },
-  visible: (i: number) => ({ opacity: 1, y: 0, transition: { delay: i * 0.1, duration: 0.5 } }),
+  hidden: { opacity: 0, y: 30 },
+  visible: (i: number) => ({ opacity: 1, y: 0, transition: { delay: i * 0.1, duration: 0.6, ease: [0.22, 1, 0.36, 1] } }),
 };
 
+// ==========================================
+// MAIN COMPONENT
+// ==========================================
 const Landing = () => {
   const navigate = useNavigate();
   const { signInWithGoogle, loading, firebaseUser } = useAuth();
@@ -37,125 +44,143 @@ const Landing = () => {
       navigate("/dashboard");
       return;
     }
-
     await handleAuthClick();
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Nav */}
-      <nav className="fixed top-0 w-full z-50 glass border-b border-border/30">
-        <div className="container mx-auto flex items-center justify-between h-16 px-6">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center">
-              <FileText className="h-4 w-4 text-primary" />
+    <div className="min-h-screen bg-background selection:bg-primary/20 selection:text-primary relative overflow-hidden">
+      
+      {/* Ambient Background Effects */}
+      <div className="fixed top-[-20%] left-[-10%] w-[50%] h-[50%] bg-primary/10 rounded-full blur-[150px] -z-10 pointer-events-none" />
+      <div className="fixed bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-accent/10 rounded-full blur-[150px] -z-10 pointer-events-none" />
+      <div className="fixed inset-0 grid-pattern opacity-[0.15] -z-10 pointer-events-none" />
+
+      {/* Navigation */}
+      <nav className="fixed top-0 w-full z-50 glass border-b border-border/30 supports-[backdrop-filter]:bg-background/40">
+        <div className="container mx-auto flex items-center justify-between h-16 px-4 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/80 to-primary/20 flex items-center justify-center shadow-inner">
+              <FileText className="h-4 w-4 text-white" />
             </div>
-            <span className="font-semibold text-lg text-foreground">BuildMyResume</span>
+            <span className="hidden sm:inline font-bold text-xl tracking-tight text-foreground">BuildMyResume</span>
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" onClick={handleAuthClick} disabled={loading}>
+          <div className="flex items-center gap-4">
+            <ThemeToggle className="h-9 w-9 border-border/60 bg-background/40" />
+            <Button variant="ghost" size="sm" onClick={handleAuthClick} disabled={loading} className="hidden sm:flex hover:bg-primary/10 hover:text-primary font-medium">
               Log in
             </Button>
-            <Button variant="hero" size="sm" onClick={handleGetStarted} disabled={loading}>
+            <Button variant="hero" size="sm" onClick={handleGetStarted} disabled={loading} className="glow-primary font-medium">
               Get Started
             </Button>
           </div>
         </div>
       </nav>
 
-      {/* Hero */}
-      <section className="relative pt-32 pb-20 overflow-hidden">
-        <div className="absolute inset-0 grid-pattern opacity-40" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-primary/5 blur-[120px]" />
-        <div className="container mx-auto px-6 relative">
+      {/* Hero Section */}
+      <section className="relative pt-28 sm:pt-32 lg:pt-48 pb-20 sm:pb-24 lg:pb-32 overflow-hidden">
+        <div className="container mx-auto px-4 sm:px-6 relative z-10">
           <motion.div
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7 }}
-            className="max-w-3xl mx-auto text-center"
+            transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+            className="max-w-4xl mx-auto text-center flex flex-col items-center"
           >
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-primary/20 bg-primary/5 text-primary text-sm font-medium mb-8">
-              <Sparkles className="h-3.5 w-3.5" />
-              AI-Powered Resume Tailoring
-            </div>
-            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.1] mb-6">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.2 }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-primary/30 bg-primary/10 text-primary text-sm font-semibold mb-8 backdrop-blur-md shadow-[0_0_15px_rgba(var(--primary),0.15)]"
+            >
+              <Sparkles className="h-4 w-4" />
+              AI-Powered Resume Tailoring & Portfolio Gen
+            </motion.div>
+            
+            <h1 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-extrabold tracking-tighter leading-[1.05] mb-8">
               <span className="text-foreground">Tailor Resumes.</span>
               <br />
-              <span className="text-gradient">Generate Portfolios.</span>
+              <span className="text-gradient bg-clip-text text-transparent">Deploy Portfolios.</span>
             </h1>
-            <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto mb-10 leading-relaxed">
+            
+            <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed font-medium">
               Upload your master resume, paste any job description, and get a perfectly tailored resume plus a unique portfolio URL — all in seconds.
             </p>
-            <div className="flex items-center justify-center gap-4">
-              <Button variant="hero" size="lg" className="text-base px-8" onClick={handleGetStarted} disabled={loading}>
-                Start Free <ArrowRight className="ml-1 h-4 w-4" />
+            
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
+              <Button variant="hero" size="lg" className="w-full sm:w-auto text-base px-8 h-14 glow-strong hover:scale-105 active:scale-95 transition-all" onClick={handleGetStarted} disabled={loading}>
+                Start Building Free <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
-              <Button variant="hero-outline" size="lg" className="text-base px-8">
-                See Demo
+              <Button variant="outline" size="lg" className="w-full sm:w-auto text-base px-8 h-14 bg-background/50 backdrop-blur-md hover:bg-background/80 border-border/50 hover:text-primary transition-all">
+                View Live Demo
               </Button>
             </div>
           </motion.div>
         </div>
       </section>
 
-      {/* Features */}
-      <section className="py-24 relative">
-        <div className="container mx-auto px-6">
+      {/* Features Grid */}
+      <section className="py-20 sm:py-24 relative z-10">
+        <div className="container mx-auto px-4 sm:px-6">
           <motion.div
-            initial={{ opacity: 0 }}
-            whileInView={{ opacity: 1 }}
-            viewport={{ once: true }}
+            initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.6 }}
             className="text-center mb-16"
           >
-            <h2 className="text-3xl md:text-4xl font-bold mb-4 text-foreground">Everything you need</h2>
-            <p className="text-muted-foreground text-lg max-w-md mx-auto">
-              From resume parsing to portfolio deployment, all in one platform.
+            <h2 className="text-3xl md:text-5xl font-bold mb-4 text-foreground tracking-tight">Everything you need to land it.</h2>
+            <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+              From intelligent resume parsing to edge-deployed portfolios, all seamlessly integrated into one platform.
             </p>
           </motion.div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 max-w-6xl mx-auto">
             {features.map((f, i) => (
               <motion.div
-                key={f.title}
-                custom={i}
-                variants={fadeUp}
-                initial="hidden"
-                whileInView="visible"
-                viewport={{ once: true }}
-                className="group p-6 rounded-xl border border-border/50 bg-card/40 hover:bg-card/70 hover:border-primary/20 transition-all duration-300"
+                key={f.title} custom={i} variants={fadeUp} initial="hidden" whileInView="visible" viewport={{ once: true, margin: "-50px" }}
+                whileHover={{ y: -5 }}
+                className="group glass p-8 rounded-2xl border-border/50 hover:border-primary/30 transition-all duration-300 hover:shadow-xl hover:shadow-primary/5"
               >
-                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                  <f.icon className="h-5 w-5 text-primary" />
+                <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center mb-6 group-hover:bg-primary group-hover:scale-110 transition-all duration-300">
+                  <f.icon className="h-6 w-6 text-primary group-hover:text-primary-foreground transition-colors" />
                 </div>
-                <h3 className="font-semibold text-foreground mb-2">{f.title}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
+                <h3 className="text-xl font-semibold text-foreground mb-3 tracking-tight">{f.title}</h3>
+                <p className="text-muted-foreground leading-relaxed">{f.desc}</p>
               </motion.div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* CTA */}
-      <section className="py-24">
-        <div className="container mx-auto px-6">
-          <div className="relative rounded-2xl border border-primary/20 bg-card/30 p-12 md:p-16 text-center overflow-hidden">
-            <div className="absolute inset-0 bg-primary/5 blur-3xl rounded-full w-96 h-96 mx-auto my-auto" />
-            <div className="relative">
-              <h2 className="text-3xl md:text-4xl font-bold mb-4 text-foreground">Ready to stand out?</h2>
-              <p className="text-muted-foreground text-lg max-w-md mx-auto mb-8">
-                Join thousands of professionals who tailor their resumes and portfolios with AI.
+      {/* CTA Section */}
+      <section className="py-20 sm:py-24 lg:py-32 relative z-10">
+        <div className="container mx-auto px-4 sm:px-6">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} transition={{ duration: 0.7 }}
+            className="relative glass rounded-3xl border border-primary/20 p-8 sm:p-10 md:p-20 text-center overflow-hidden max-w-5xl mx-auto shadow-2xl"
+          >
+            {/* Internal CTA Glow */}
+            <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-accent/10 opacity-50" />
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg h-64 bg-primary/20 blur-[100px] rounded-full pointer-events-none" />
+            
+            <div className="relative z-10 flex flex-col items-center">
+              <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold mb-6 text-foreground tracking-tight">Ready to stand out?</h2>
+              <p className="text-muted-foreground text-lg sm:text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
+                Join thousands of developers and professionals who tailor their resumes and deploy edge portfolios with AI.
               </p>
-              <Button variant="hero" size="lg" className="text-base px-10" onClick={handleGetStarted} disabled={loading}>
-                Get Started Free <ArrowRight className="ml-1 h-4 w-4" />
+              <Button variant="hero" size="lg" className="text-lg px-12 h-16 glow-strong hover:scale-105 active:scale-95 transition-all rounded-full" onClick={handleGetStarted} disabled={loading}>
+                Get Started for Free <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
+              <p className="text-sm text-muted-foreground mt-6 font-medium">No credit card required. Sign in with Google.</p>
             </div>
-          </div>
+          </motion.div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border/30 py-8">
-        <div className="container mx-auto px-6 text-center text-sm text-muted-foreground">
-          © 2026 BuildMyResume. All rights reserved.
+      <footer className="border-t border-border/20 bg-background/50 backdrop-blur-sm relative z-10 py-10 sm:py-12">
+        <div className="container mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2 text-foreground font-semibold">
+            <FileText className="h-5 w-5 text-primary" />
+            BuildMyResume
+          </div>
+          <div className="text-sm text-muted-foreground font-medium">
+            © {new Date().getFullYear()} BuildMyResume. Built with precision.
+          </div>
         </div>
       </footer>
     </div>

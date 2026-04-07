@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
 	analyzeJobDescriptionEndpoint,
+	generateDescriptionBullets,
 	extendProjectBullet,
 	matchMasterDataForJd,
 	generateUserProfileSummary,
@@ -14,6 +15,7 @@ const router = Router();
 router.post("/tailor", verifyFirebaseToken, tailorResume);
 router.post("/project-bullet/extend", verifyFirebaseToken, extendProjectBullet);
 router.post("/profile-summary", verifyFirebaseToken, generateUserProfileSummary);
+router.post("/description-bullets", verifyFirebaseToken, generateDescriptionBullets);
 
 // Two-stage prompting endpoints (NEW)
 router.post("/analyze-jd", verifyFirebaseToken, analyzeJobDescriptionEndpoint);

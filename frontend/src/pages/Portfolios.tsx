@@ -1,5 +1,5 @@
-import { motion } from "framer-motion";
-import { Globe, Github, ExternalLink, Link as LinkIcon } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Globe, Github, ExternalLink, Link as LinkIcon, Paintbrush, Code2, Rocket, CheckCircle2, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -20,154 +20,117 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/use-auth";
 import { toast } from "sonner";
+import { apiRequest, getBackendOrigin } from "@/lib/api";
 
-type DomainSetup = {
-  domain?: string;
-  status?: string;
-  cnameTarget?: string;
-  instructions?: string;
-};
-
-type PublishResponse = {
-  success: boolean;
-  url?: string;
-  domainSetup?: DomainSetup | null;
-  error?: string;
-  traceId?: string;
-  details?: string;
-};
-
-type GitHubExportResponse = {
-  success: boolean;
-  repoUrl?: string;
-  owner?: string;
-  repoName?: string;
-  branch?: string;
-  pathPrefix?: string;
-  filesUpdated?: number;
-  createdRepo?: boolean;
-  error?: string;
-  details?: string;
-  traceId?: string;
+// ==========================================
+// TYPES
+// ==========================================
+type DomainSetup = { domain?: string; status?: string; cnameTarget?: string; instructions?: string; };
+type PublishResponse = { success: boolean; url?: string; domainSetup?: DomainSetup | null; error?: string; traceId?: string; details?: string; };
+type GitHubExportResponse = { success: boolean; repoUrl?: string; owner?: string; repoName?: string; branch?: string; pathPrefix?: string; filesUpdated?: number; createdRepo?: boolean; error?: string; details?: string; traceId?: string; };
+type DashboardSummary = {
+  activePortfolio: { url: string; customDomain: string; projectName: string; publishedAt: string | null } | null;
 };
 
 type ThemeOption = "minimal" | "dark" | "glassmorphism" | "cyberpunk";
 type FontOption = "Inter" | "JetBrains Mono" | "Sora" | "Space Grotesk";
 type AnimationOption = "none" | "subtle" | "rich";
 
-type PublishPreference = {
-  theme: ThemeOption;
-  font: FontOption;
-  animations: AnimationOption;
-  accent: string;
-  notes: string;
-};
+type PublishPreference = { theme: ThemeOption; font: FontOption; animations: AnimationOption; accent: string; notes: string; };
+type GitHubExportForm = { token: string; repoOwner: string; repoName: string; branch: string; pathPrefix: string; privateRepo: boolean; };
 
-type GitHubExportForm = {
-  token: string;
-  repoOwner: string;
-  repoName: string;
-  branch: string;
-  pathPrefix: string;
-  privateRepo: boolean;
-};
+// ==========================================
+// CONSTANTS
+// ==========================================
+const DEFAULT_PREFERENCE: PublishPreference = { theme: "minimal", font: "Inter", animations: "subtle", accent: "#0ea5e9", notes: "" };
+const PUBLISH_STEPS = [ "Preparing profile data", "Generating React template", "Building dist assets", "Uploading to Cloudflare" ];
+const DEFAULT_GITHUB_EXPORT_FORM: GitHubExportForm = { token: "", repoOwner: "", repoName: "", branch: "main", pathPrefix: "", privateRepo: false };
 
-const DEFAULT_PREFERENCE: PublishPreference = {
-  theme: "minimal",
-  font: "Inter",
-  animations: "subtle",
-  accent: "#0ea5e9",
-  notes: ""
-};
-
-const PUBLISH_STEPS = [
-  "Preparing profile data",
-  "Generating React template",
-  "Building dist assets",
-  "Uploading to Cloudflare"
-];
-
-const DEFAULT_GITHUB_EXPORT_FORM: GitHubExportForm = {
-  token: "",
-  repoOwner: "",
-  repoName: "",
-  branch: "main",
-  pathPrefix: "",
-  privateRepo: false
-};
-
+// ==========================================
+// MAIN COMPONENT
+// ==========================================
 const Portfolios = () => {
   const { idToken } = useAuth();
+  
+  // State
   const [preference, setPreference] = useState<PublishPreference>(DEFAULT_PREFERENCE);
   const [customDomain, setCustomDomain] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [publishStep, setPublishStep] = useState(0);
   const [liveUrl, setLiveUrl] = useState("");
   const [domainSetup, setDomainSetup] = useState<DomainSetup | null>(null);
+  const [activePortfolio, setActivePortfolio] = useState<DashboardSummary["activePortfolio"]>(null);
+  
+  // GitHub State
   const [githubDialogOpen, setGithubDialogOpen] = useState(false);
   const [githubExporting, setGithubExporting] = useState(false);
   const [githubExportResult, setGithubExportResult] = useState<GitHubExportResponse | null>(null);
   const [githubForm, setGithubForm] = useState<GitHubExportForm>(DEFAULT_GITHUB_EXPORT_FORM);
 
-  const publishEndpoint = useMemo(() => {
-    const apiBase = import.meta.env.VITE_API_URL || "";
-    return apiBase.replace(/\/api\/v1\/?$/i, "") + "/portfolio/publish";
-  }, []);
+  // Endpoints
+  const publishEndpoint = useMemo(() => `${getBackendOrigin()}/portfolio/publish`, []);
+  const githubExportEndpoint = useMemo(() => `${getBackendOrigin()}/portfolio/github`, []);
 
-  const githubExportEndpoint = useMemo(() => {
-    const apiBase = import.meta.env.VITE_API_URL || "";
-    return apiBase.replace(/\/api\/v1\/?$/i, "") + "/portfolio/github";
-  }, []);
+  useEffect(() => {
+    const loadSavedPortfolio = async () => {
+      if (!idToken) {
+        return;
+      }
 
+      try {
+        const response = await apiRequest<DashboardSummary>("/dashboard/summary", { token: idToken });
+        const savedPortfolio = response.data.activePortfolio;
+
+        setActivePortfolio(savedPortfolio || null);
+
+        if (savedPortfolio?.url) {
+          setLiveUrl(savedPortfolio.customDomain || savedPortfolio.url);
+        }
+      } catch {
+        // Ignore background hydration errors; publish action still works.
+      }
+    };
+
+    void loadSavedPortfolio();
+  }, [idToken]);
+
+  // Handlers
   const handlePublish = async () => {
-    if (!idToken) {
-      toast.error("Please sign in first");
-      return;
-    }
+    if (!idToken) return toast.error("Please sign in first");
 
     try {
-      setPublishing(true);
-      setPublishStep(1);
-
-      const preferencePayload = {
-        theme: preference.theme,
-        font: preference.font,
-        animations: preference.animations,
-        accent: preference.accent,
-        notes: preference.notes.trim()
-      };
-
+      setPublishing(true); setPublishStep(1); setLiveUrl(""); setDomainSetup(null);
+      const preferencePayload = { theme: preference.theme, font: preference.font, animations: preference.animations, accent: preference.accent, notes: preference.notes.trim() };
       setPublishStep(2);
 
       const response = await fetch(publishEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`
-        },
-        body: JSON.stringify({
-          preference: preferencePayload,
-          customDomain: customDomain.trim()
-        })
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ preference: preferencePayload, customDomain: customDomain.trim() })
       });
 
       setPublishStep(3);
-
       const payload = (await response.json()) as PublishResponse;
 
       if (!response.ok || !payload.success) {
         const message = payload.details || payload.error || "Failed to publish portfolio";
         const traceSuffix = payload.traceId ? ` (trace: ${payload.traceId.slice(0, 8)})` : "";
-        toast.error(`${message}${traceSuffix}`);
-        return;
+        return toast.error(`${message}${traceSuffix}`);
       }
 
-      setLiveUrl(payload.url || "");
-      setDomainSetup(payload.domainSetup || null);
-      setPublishStep(4);
+      const savedUrl = payload.url || customDomain.trim() || liveUrl;
+      const savedCustomDomain = customDomain.trim();
+
+      setLiveUrl(savedUrl || "");
+      setActivePortfolio({
+        url: savedUrl || "",
+        customDomain: savedCustomDomain,
+        projectName: activePortfolio?.projectName || "Portfolio",
+        publishedAt: new Date().toISOString()
+      });
+      setDomainSetup(payload.domainSetup || null); setPublishStep(4);
       toast.success("Portfolio published successfully");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to publish portfolio");
@@ -177,54 +140,28 @@ const Portfolios = () => {
   };
 
   const handleExportToGitHub = async () => {
-    if (!idToken) {
-      toast.error("Please sign in first");
-      return;
-    }
-
-    if (!githubForm.token.trim() || !githubForm.repoName.trim()) {
-      toast.error("GitHub token and repository name are required");
-      return;
-    }
+    if (!idToken) return toast.error("Please sign in first");
+    if (!githubForm.token.trim() || !githubForm.repoName.trim()) return toast.error("GitHub token and repository name are required");
 
     try {
       setGithubExporting(true);
-
       const response = await fetch(githubExportEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`
-        },
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({
-          token: githubForm.token.trim(),
-          repoOwner: githubForm.repoOwner.trim(),
-          repoName: githubForm.repoName.trim(),
-          branch: githubForm.branch.trim() || "main",
-          pathPrefix: githubForm.pathPrefix.trim(),
-          createRepo: true,
-          privateRepo: githubForm.privateRepo,
-          preference: {
-            theme: preference.theme,
-            font: preference.font,
-            animations: preference.animations,
-            accent: preference.accent,
-            notes: preference.notes.trim()
-          }
+          token: githubForm.token.trim(), repoOwner: githubForm.repoOwner.trim(), repoName: githubForm.repoName.trim(), branch: githubForm.branch.trim() || "main",
+          pathPrefix: githubForm.pathPrefix.trim(), createRepo: true, privateRepo: githubForm.privateRepo,
+          preference: { theme: preference.theme, font: preference.font, animations: preference.animations, accent: preference.accent, notes: preference.notes.trim() }
         })
       });
 
       const payload = (await response.json()) as GitHubExportResponse;
-
       if (!response.ok || !payload.success) {
-        const message = payload.details || payload.error || "Failed to export portfolio to GitHub";
+        const message = payload.details || payload.error || "Failed to export to GitHub";
         const traceSuffix = payload.traceId ? ` (trace: ${payload.traceId.slice(0, 8)})` : "";
-        toast.error(`${message}${traceSuffix}`);
-        return;
+        return toast.error(`${message}${traceSuffix}`);
       }
 
-      setGithubExportResult(payload);
-      setGithubDialogOpen(false);
+      setGithubExportResult(payload); setGithubDialogOpen(false);
       toast.success("Portfolio source exported to GitHub successfully");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to export portfolio to GitHub");
@@ -234,311 +171,312 @@ const Portfolios = () => {
   };
 
   const progressValue = useMemo(() => {
-    if (!publishing && publishStep === 0) {
-      return 0;
-    }
-
-    const capped = Math.min(publishStep, PUBLISH_STEPS.length);
-    return Math.round((capped / PUBLISH_STEPS.length) * 100);
+    if (!publishing && publishStep === 0) return 0;
+    return Math.round((Math.min(publishStep, PUBLISH_STEPS.length) / PUBLISH_STEPS.length) * 100);
   }, [publishing, publishStep]);
 
+  const portfolioLabel = activePortfolio?.customDomain || activePortfolio?.url || liveUrl;
+  const portfolioPublishedAt = activePortfolio?.publishedAt
+    ? new Date(activePortfolio.publishedAt).toLocaleString()
+    : "";
+
   return (
-    <div className="p-8 max-w-4xl">
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground mb-1">Portfolios</h1>
-            <p className="text-muted-foreground">Publish your portfolio in one click with AI generation and Cloudflare Pages deploy.</p>
+    <div className="page-shell page-shell-md space-y-8">
+      {/* Header Area */}
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-gradient mb-2 tracking-tight">Deploy Portfolio</h1>
+          <p className="text-muted-foreground text-base sm:text-lg max-w-2xl">Generate and deploy your personal site to Cloudflare Pages instantly.</p>
+        </div>
+        <Badge variant="secondary" className="self-start md:self-auto bg-primary/10 text-primary border-primary/20 px-3 py-1.5 text-xs font-medium">1-Click CI/CD</Badge>
+      </motion.div>
+
+      {/* Info Banner */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="rounded-2xl border border-primary/20 bg-primary/5 p-5 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-1.5 h-full bg-primary" />
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+            <Server className="h-5 w-5 text-primary" />
           </div>
-          <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20">1-Click Publish</Badge>
+          <div>
+            <p className="text-sm font-semibold text-foreground">Automated Deployment Pipeline</p>
+            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
+              <span className="font-mono bg-background/50 px-1 rounded">Profile Data</span> → 
+              <span className="font-mono bg-background/50 px-1 rounded">React Gen</span> → 
+              <span className="font-mono bg-background/50 px-1 rounded">Vite Build</span> → 
+              <span className="font-mono bg-background/50 px-1 rounded">Cloudflare Deploy</span>
+            </p>
+          </div>
         </div>
       </motion.div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05 }}
-        className="rounded-xl border border-primary/20 bg-primary/5 p-4 mb-6"
-      >
-        <div className="flex items-center gap-3">
-          <Globe className="h-5 w-5 text-primary" />
-          <div>
-            <p className="text-sm font-medium text-foreground">Flow: Generate React template {"->"} Build dist {"->"} Deploy to Cloudflare Pages</p>
-            <p className="text-xs text-muted-foreground">Uses profile JSON + style controls (theme, font, animation, accent) for generation.</p>
-          </div>
-        </div>
-      </motion.div>
+      <div className="grid lg:grid-cols-12 gap-8">
 
-      {publishing || publishStep > 0 ? (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.08 }}
-          className="rounded-xl border border-border/50 bg-card/40 p-4 mb-6"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="font-semibold text-foreground">Deployment Progress</h2>
-            <span className="text-xs text-muted-foreground">{progressValue}%</span>
-          </div>
-          <Progress value={progressValue} className="h-2" />
-          <p className="text-xs text-muted-foreground mt-2">
-            {publishStep > 0 ? PUBLISH_STEPS[Math.min(publishStep - 1, PUBLISH_STEPS.length - 1)] : "Waiting"}
-          </p>
-        </motion.div>
-      ) : null}
-
-      <div className="space-y-4">
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="rounded-xl border border-border/50 bg-card/40 p-4"
-        >
-          <h2 className="font-semibold text-foreground mb-3">Publish Portfolio</h2>
-          <div className="grid gap-3 md:grid-cols-2 mb-3">
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Theme</p>
-              <Select
-                value={preference.theme}
-                onValueChange={(value) => setPreference((prev) => ({ ...prev, theme: value as ThemeOption }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select theme" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="minimal">Minimal</SelectItem>
-                  <SelectItem value="dark">Dark</SelectItem>
-                  <SelectItem value="glassmorphism">Glassmorphism</SelectItem>
-                  <SelectItem value="cyberpunk">Cyberpunk</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Font</p>
-              <Select
-                value={preference.font}
-                onValueChange={(value) => setPreference((prev) => ({ ...prev, font: value as FontOption }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select font" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Inter">Inter</SelectItem>
-                  <SelectItem value="JetBrains Mono">JetBrains Mono</SelectItem>
-                  <SelectItem value="Sora">Sora</SelectItem>
-                  <SelectItem value="Space Grotesk">Space Grotesk</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Animations</p>
-              <Select
-                value={preference.animations}
-                onValueChange={(value) => setPreference((prev) => ({ ...prev, animations: value as AnimationOption }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select animation intensity" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  <SelectItem value="subtle">Subtle</SelectItem>
-                  <SelectItem value="rich">Rich</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Accent Color</p>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="color"
-                  value={preference.accent}
-                  onChange={(event) => setPreference((prev) => ({ ...prev, accent: event.target.value }))}
-                  className="h-10 w-16 cursor-pointer p-1"
-                />
-                <Input
-                  value={preference.accent}
-                  onChange={(event) => setPreference((prev) => ({ ...prev, accent: event.target.value }))}
-                  placeholder="#0ea5e9"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 mb-3">
-            <Textarea
-              value={preference.notes}
-              onChange={(event) => setPreference((prev) => ({ ...prev, notes: event.target.value }))}
-              placeholder="Extra design notes (optional), e.g. high-contrast hero, cleaner project cards, large section titles"
-              className="min-h-[90px]"
-            />
-            <Input
-              value={customDomain}
-              onChange={(event) => setCustomDomain(event.target.value)}
-              placeholder="Optional custom domain (e.g. portfolio.example.com)"
-            />
-          </div>
-          <Button variant="hero" size="sm" onClick={handlePublish} disabled={publishing || !idToken}>
-            {publishing ? "Publishing..." : "Publish Portfolio"}
-          </Button>
-        </motion.div>
-
-        {liveUrl ? (
-          <motion.div
-            key={liveUrl}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.12 }}
-            className="p-4 rounded-xl border border-border/50 bg-card/40 space-y-4"
-          >
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-4">
-                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Globe className="h-5 w-5 text-primary" />
+        <AnimatePresence>
+          {activePortfolio && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="lg:col-span-12 glass rounded-2xl p-5 border-primary/20 shadow-sm"
+            >
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Saved Portfolio</p>
+                  <h2 className="text-lg font-bold text-foreground">Your live portfolio is saved</h2>
+                  <p className="text-sm text-muted-foreground break-all">{portfolioLabel}</p>
+                  {portfolioPublishedAt && (
+                    <p className="text-xs text-muted-foreground">Published {portfolioPublishedAt}</p>
+                  )}
                 </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium text-foreground font-mono text-sm break-all">{liveUrl}</p>
-                    <Badge variant="secondary" className="text-xs bg-emerald-100 text-emerald-700 border-emerald-200">LIVE</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Share this URL with anyone to view your portfolio.</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <a href={liveUrl} target="_blank" rel="noreferrer">
-                  <Button variant="ghost" size="sm" className="gap-2">
-                    <ExternalLink className="h-4 w-4" />
-                    Open
+
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Button variant="outline" onClick={() => activePortfolio?.url && window.open(activePortfolio.url, "_blank")} disabled={!activePortfolio?.url} className="w-full sm:w-auto">
+                    <ExternalLink className="h-4 w-4 mr-2" /> Open Live Site
                   </Button>
-                </a>
-                <Button variant="hero" size="sm" className="gap-2" onClick={() => setGithubDialogOpen(true)}>
-                  <Github className="h-4 w-4" />
-                  Add to GitHub
-                </Button>
+                  <Button variant="secondary" onClick={() => navigator.clipboard.writeText(portfolioLabel || "").then(() => toast.success("Portfolio link copied"))} disabled={!portfolioLabel} className="w-full sm:w-auto">
+                    <LinkIcon className="h-4 w-4 mr-2" /> Copy Link
+                  </Button>
+                </div>
               </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
+        {/* Main Configuration Column */}
+        <motion.div className="lg:col-span-8 space-y-6" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }}>
+          <div className="glass rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-border/40">
+              <Paintbrush className="w-5 h-5 text-primary" />
+              <h2 className="font-semibold text-lg text-foreground">Design System</h2>
             </div>
-
-            {githubExportResult ? (
-              <div className="rounded-lg border border-border/50 bg-background/60 p-3 text-sm">
-                <p className="font-semibold text-foreground">GitHub Export Ready</p>
-                <p className="text-muted-foreground mt-1 break-all">
-                  Repo: <a className="text-primary underline" href={githubExportResult.repoUrl} target="_blank" rel="noreferrer">{githubExportResult.repoUrl}</a>
-                </p>
-                <p className="text-muted-foreground mt-1">
-                  Branch: {githubExportResult.branch || "main"} · Files updated: {githubExportResult.filesUpdated ?? 0}
-                </p>
-              </div>
-            ) : null}
-          </motion.div>
-        ) : null}
-
-        <Dialog open={githubDialogOpen} onOpenChange={setGithubDialogOpen}>
-          <DialogContent className="max-w-xl">
-            <DialogHeader>
-              <DialogTitle>Add Generated Portfolio to GitHub</DialogTitle>
-              <DialogDescription>
-                Enter a GitHub personal access token and repo details. The backend will regenerate the same portfolio source tree and push it to your repo.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="grid gap-3 py-2">
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-muted-foreground">GitHub Token</p>
-                <Input
-                  type="password"
-                  value={githubForm.token}
-                  onChange={(event) => setGithubForm((prev) => ({ ...prev, token: event.target.value }))}
-                  placeholder="ghp_..."
-                />
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Repository Owner</p>
-                  <Input
-                    value={githubForm.repoOwner}
-                    onChange={(event) => setGithubForm((prev) => ({ ...prev, repoOwner: event.target.value }))}
-                    placeholder="Optional, defaults to authenticated user"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Repository Name</p>
-                  <Input
-                    value={githubForm.repoName}
-                    onChange={(event) => setGithubForm((prev) => ({ ...prev, repoName: event.target.value }))}
-                    placeholder="my-portfolio"
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Branch</p>
-                  <Input
-                    value={githubForm.branch}
-                    onChange={(event) => setGithubForm((prev) => ({ ...prev, branch: event.target.value }))}
-                    placeholder="main"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Path Prefix</p>
-                  <Input
-                    value={githubForm.pathPrefix}
-                    onChange={(event) => setGithubForm((prev) => ({ ...prev, pathPrefix: event.target.value }))}
-                    placeholder="Optional folder path in repo"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-muted-foreground">Visibility</p>
-                <Select
-                  value={githubForm.privateRepo ? "private" : "public"}
-                  onValueChange={(value) => setGithubForm((prev) => ({ ...prev, privateRepo: value === "private" }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select visibility" />
-                  </SelectTrigger>
+            
+            <div className="grid gap-5 md:grid-cols-2 mb-6">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-foreground ml-1">Theme Aesthetic</label>
+                <Select value={preference.theme} onValueChange={(v) => setPreference((p) => ({ ...p, theme: v as ThemeOption }))}>
+                  <SelectTrigger className="bg-background/50 focus:ring-primary"><SelectValue placeholder="Select theme" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="public">Public</SelectItem>
-                    <SelectItem value="private">Private</SelectItem>
+                    <SelectItem value="minimal">Minimalist Clean</SelectItem>
+                    <SelectItem value="dark">Deep Dark</SelectItem>
+                    <SelectItem value="glassmorphism">Glassmorphism (Frosted)</SelectItem>
+                    <SelectItem value="cyberpunk">Cyberpunk Neon</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-foreground ml-1">Typography</label>
+                <Select value={preference.font} onValueChange={(v) => setPreference((p) => ({ ...p, font: v as FontOption }))}>
+                  <SelectTrigger className="bg-background/50 focus:ring-primary"><SelectValue placeholder="Select font" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Inter">Inter (Sans-serif)</SelectItem>
+                    <SelectItem value="JetBrains Mono">JetBrains Mono (Tech)</SelectItem>
+                    <SelectItem value="Sora">Sora (Modern)</SelectItem>
+                    <SelectItem value="Space Grotesk">Space Grotesk (Edgy)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-foreground ml-1">UI Animations</label>
+                <Select value={preference.animations} onValueChange={(v) => setPreference((p) => ({ ...p, animations: v as AnimationOption }))}>
+                  <SelectTrigger className="bg-background/50 focus:ring-primary"><SelectValue placeholder="Select animation" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None (Static)</SelectItem>
+                    <SelectItem value="subtle">Subtle Fades</SelectItem>
+                    <SelectItem value="rich">Rich & Interactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-foreground ml-1">Primary Accent Color</label>
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-12 rounded-md overflow-hidden border border-border/50 shrink-0 relative shadow-sm">
+                     <input type="color" value={preference.accent} onChange={(e) => setPreference((p) => ({ ...p, accent: e.target.value }))} className="absolute -top-2 -left-2 w-16 h-16 cursor-pointer" />
+                  </div>
+                  <Input value={preference.accent} onChange={(e) => setPreference((p) => ({ ...p, accent: e.target.value }))} placeholder="#0ea5e9" className="bg-background/50 font-mono text-sm uppercase focus-visible:ring-primary" />
+                </div>
+              </div>
             </div>
 
-            <DialogFooter>
-              <Button variant="ghost" onClick={() => setGithubDialogOpen(false)}>Cancel</Button>
-              <Button variant="hero" onClick={handleExportToGitHub} disabled={githubExporting}>
-                {githubExporting ? "Exporting..." : "Export to GitHub"}
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-foreground ml-1">AI Generation Notes (Optional)</label>
+                <Textarea value={preference.notes} onChange={(e) => setPreference((p) => ({ ...p, notes: e.target.value }))} placeholder="e.g. Make the hero section high-contrast, emphasize open-source contributions, use a grid layout for projects." className="min-h-[100px] bg-background/50 resize-y focus-visible:ring-primary" />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-foreground ml-1">Custom Domain (Optional)</label>
+                <Input value={customDomain} onChange={(e) => setCustomDomain(e.target.value)} placeholder="portfolio.yourname.com" className="bg-background/50 font-mono text-sm focus-visible:ring-primary" />
+              </div>
+            </div>
+            
+            <div className="mt-8 pt-6 border-t border-border/40">
+              <Button onClick={handlePublish} disabled={publishing || !idToken} className="w-full h-12 text-base font-semibold glow-primary shadow-primary/25 hover:brightness-110 transition-all">
+                <Rocket className="h-5 w-5 mr-2" /> {publishing ? "Initializing Pipeline..." : "Build & Publish Portfolio"}
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {domainSetup ? (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.14 }}
-            className="rounded-xl border border-border/50 bg-card/40 p-4"
-          >
-            <h2 className="font-semibold text-foreground mb-3">Custom Domain Setup</h2>
-            <div className="space-y-2 text-sm">
-              {domainSetup.domain ? <p><strong>Domain:</strong> {domainSetup.domain}</p> : null}
-              {domainSetup.status ? <p><strong>Status:</strong> {domainSetup.status}</p> : null}
-              {domainSetup.cnameTarget ? <p><strong>CNAME Target:</strong> {domainSetup.cnameTarget}</p> : null}
-              {domainSetup.instructions ? (
-                <p className="inline-flex items-center gap-2 text-primary"><LinkIcon className="h-4 w-4" />{domainSetup.instructions}</p>
-              ) : null}
             </div>
-          </motion.div>
-        ) : null}
+          </div>
+
+          {/* Deployment Progress Card */}
+          <AnimatePresence>
+            {(publishing || publishStep > 0) && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="glass rounded-2xl p-6 overflow-hidden">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-foreground flex items-center gap-2">
+                    {publishStep === 4 ? <CheckCircle2 className="w-5 h-5 text-primary" /> : <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />}
+                    Deployment Status
+                  </h3>
+                  <Badge variant="outline" className={publishStep === 4 ? "text-primary border-primary/30" : "text-muted-foreground"}>{progressValue}%</Badge>
+                </div>
+                <Progress value={progressValue} className="h-2.5 bg-background/50" />
+                <div className="mt-4 space-y-2">
+                  {PUBLISH_STEPS.map((step, index) => (
+                    <div key={index} className={`text-xs flex items-center gap-2 transition-colors duration-300 ${index < publishStep ? "text-foreground" : "text-muted-foreground/40"}`}>
+                      <div className={`w-1.5 h-1.5 rounded-full ${index < publishStep ? "bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]" : "bg-muted-foreground/30"}`} />
+                      {step}
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+
+        {/* Side Column: Success States & GitHub Export */}
+        <motion.div className="lg:col-span-4 space-y-6" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15 }}>
+          <AnimatePresence>
+            {liveUrl && (
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="glass rounded-2xl p-6 border-primary/30 shadow-[0_0_30px_rgba(var(--primary),0.05)] relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none" />
+                
+                <div className="mb-5 pb-5 border-b border-border/40">
+                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                    <Globe className="h-6 w-6 text-primary" />
+                  </div>
+                  <h3 className="font-bold text-lg text-foreground mb-1">Your Site is Live!</h3>
+                  <p className="text-xs text-muted-foreground">Deployed globally to the edge via Cloudflare.</p>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="bg-background/60 border border-border/50 rounded-lg p-3 group relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500" />
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1 ml-2">Production URL</p>
+                    <a href={liveUrl} target="_blank" rel="noreferrer" className="text-sm font-mono text-foreground hover:text-primary transition-colors ml-2 break-all line-clamp-2">
+                      {liveUrl}
+                    </a>
+                  </div>
+
+                  <Button className="w-full" variant="outline" onClick={() => window.open(liveUrl, "_blank")}>
+                    <ExternalLink className="h-4 w-4 mr-2" /> Visit Live Site
+                  </Button>
+                  
+                  <div className="pt-4 border-t border-border/40">
+                    <p className="text-xs text-muted-foreground mb-3 text-center">Want to own the code?</p>
+                    <Button className="w-full bg-[#24292e] text-white hover:bg-[#24292e]/90 hover:text-white border-none" onClick={() => setGithubDialogOpen(true)}>
+                      <Github className="h-4 w-4 mr-2" /> Push Source to GitHub
+                    </Button>
+                  </div>
+                </div>
+
+                {githubExportResult && (
+                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 rounded-lg border border-border/50 bg-background/50 p-3 text-xs">
+                    <p className="font-semibold text-foreground flex items-center gap-1.5"><Code2 className="w-3.5 h-3.5" /> Source Exported</p>
+                    <div className="mt-2 space-y-1 text-muted-foreground">
+                      <p className="flex justify-between"><span>Branch:</span> <span>{githubExportResult.branch || "main"}</span></p>
+                      <p className="flex justify-between"><span>Files:</span> <span>{githubExportResult.filesUpdated ?? 0}</span></p>
+                    </div>
+                    <a href={githubExportResult.repoUrl} target="_blank" rel="noreferrer" className="mt-2 flex items-center justify-center w-full py-1.5 bg-primary/10 text-primary rounded-md hover:bg-primary/20 transition-colors">
+                      View Repository <ExternalLink className="w-3 h-3 ml-1.5" />
+                    </a>
+                  </motion.div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {domainSetup && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-2xl p-6">
+                <h3 className="font-semibold text-foreground mb-3">Custom Domain Required Actions</h3>
+                <div className="space-y-3 text-xs">
+                  <div className="bg-background/50 p-3 rounded-lg border border-border/40">
+                    <p className="text-muted-foreground mb-1">CNAME Target</p>
+                    <p className="font-mono text-foreground break-all">{domainSetup.cnameTarget || "N/A"}</p>
+                  </div>
+                  {domainSetup.instructions && (
+                    <p className="text-primary bg-primary/10 p-3 rounded-lg flex gap-2">
+                      <LinkIcon className="h-4 w-4 shrink-0 mt-0.5" /> {domainSetup.instructions}
+                    </p>
+                  )}
+                  <p className="text-muted-foreground text-[10px] mt-2">DNS propagation can take up to 24-48 hours globally.</p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
       </div>
+
+      {/* GitHub Dialog */}
+      <Dialog open={githubDialogOpen} onOpenChange={setGithubDialogOpen}>
+        <DialogContent className="glass border-border/50 w-[calc(100vw-1rem)] sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2"><Github className="w-5 h-5" /> Push to GitHub</DialogTitle>
+            <DialogDescription>
+              We will generate the entire Vite/React codebase and commit it directly to your repository so you have full ownership.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">GitHub Personal Access Token (PAT)</label>
+              <Input type="password" value={githubForm.token} onChange={(e) => setGithubForm((p) => ({ ...p, token: e.target.value }))} placeholder="ghp_..." className="bg-background/50 focus-visible:ring-primary" />
+              <p className="text-[10px] text-muted-foreground">Requires `repo` scope permissions.</p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">Repository Owner</label>
+                <Input value={githubForm.repoOwner} onChange={(e) => setGithubForm((p) => ({ ...p, repoOwner: e.target.value }))} placeholder="Optional (Defaults to you)" className="bg-background/50 focus-visible:ring-primary" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">Repository Name</label>
+                <Input value={githubForm.repoName} onChange={(e) => setGithubForm((p) => ({ ...p, repoName: e.target.value }))} placeholder="e.g. my-portfolio" className="bg-background/50 focus-visible:ring-primary" />
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">Branch</label>
+                <Input value={githubForm.branch} onChange={(e) => setGithubForm((p) => ({ ...p, branch: e.target.value }))} placeholder="main" className="bg-background/50 focus-visible:ring-primary" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">Subfolder Path (Optional)</label>
+                <Input value={githubForm.pathPrefix} onChange={(e) => setGithubForm((p) => ({ ...p, pathPrefix: e.target.value }))} placeholder="e.g. frontend" className="bg-background/50 focus-visible:ring-primary" />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Visibility</label>
+              <Select value={githubForm.privateRepo ? "private" : "public"} onValueChange={(v) => setGithubForm((p) => ({ ...p, privateRepo: v === "private" }))}>
+                <SelectTrigger className="bg-background/50 focus:ring-primary"><SelectValue placeholder="Select visibility" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="public">Public Repo</SelectItem>
+                  <SelectItem value="private">Private Repo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="ghost" onClick={() => setGithubDialogOpen(false)}>Cancel</Button>
+            <Button variant="hero" onClick={handleExportToGitHub} disabled={githubExporting} className="bg-[#24292e] text-white hover:bg-[#24292e]/90 hover:text-white border-none glow-primary">
+              {githubExporting ? "Committing Files..." : "Export Source Code"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

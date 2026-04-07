@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   expandProjectBullet,
+  generateAtsDescriptionBullets,
   generateProfileSummary,
   generateTailoredResume
 } from "../services/groq.service.js";
@@ -64,6 +65,13 @@ const expandProjectBulletSchema = z.object({
 const generateProfileSummarySchema = z.object({
   tone: z.enum(["professional", "confident", "concise", "friendly"]).optional().default("professional"),
   maxWords: z.number().int().min(40).max(180).optional().default(90)
+});
+
+const generateDescriptionBulletsSchema = z.object({
+  prompt: z.string().min(8, "prompt must be at least 8 characters"),
+  context: z.string().max(3000).optional().default(""),
+  tone: z.enum(["professional", "confident", "concise"]).optional().default("professional"),
+  count: z.number().int().min(1).max(6).optional().default(3)
 });
 
 const safeJsonParse = (value) => {
@@ -813,6 +821,38 @@ export const generateUserProfileSummary = asyncHandler(async (req, res) => {
         }
       },
       "Profile summary generated successfully"
+    )
+  );
+});
+
+export const generateDescriptionBullets = asyncHandler(async (req, res) => {
+  const parsed = generateDescriptionBulletsSchema.safeParse(req.body || {});
+
+  if (!parsed.success) {
+    throw new ApiError(400, "Invalid description generation payload", parsed.error.issues);
+  }
+
+  // Keep feature available only for authenticated profiles.
+  await findUserByFirebaseUid(req.auth.uid);
+
+  let bullets = [];
+  try {
+    bullets = await generateAtsDescriptionBullets(parsed.data);
+  } catch (error) {
+    throw new ApiError(502, error instanceof Error ? error.message : "AI provider request failed");
+  }
+
+  if (!bullets.length) {
+    throw new ApiError(502, "AI provider returned empty bullet output");
+  }
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        bullets
+      },
+      "Description bullets generated successfully"
     )
   );
 });

@@ -1,4 +1,8 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL;
+const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
+
+export const getApiBaseUrl = () => (import.meta.env.VITE_API_URL || DEFAULT_API_BASE_URL).replace(/\/$/, "");
+
+export const getBackendOrigin = () => getApiBaseUrl().replace(/\/api\/v1$/i, "");
 
 export type ApiEnvelope<T> = {
   statusCode: number;
@@ -17,24 +21,32 @@ export async function apiRequest<T>(
 ): Promise<ApiEnvelope<T>> {
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: options.method ?? "GET",
-    headers: {
-      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
-      ...(isFormData ? {} : { "Content-Type": "application/json" })
-    },
-    body: options.body
-      ? isFormData
-        ? options.body
-        : JSON.stringify(options.body)
-      : undefined
-  });
+  try {
+    const response = await fetch(`${getApiBaseUrl()}${path}`, {
+      method: options.method ?? "GET",
+      headers: {
+        ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+        ...(isFormData ? {} : { "Content-Type": "application/json" })
+      },
+      body: options.body
+        ? isFormData
+          ? options.body
+          : JSON.stringify(options.body)
+        : undefined
+    });
 
-  const payload = (await response.json()) as ApiEnvelope<T> | { message?: string };
+    const payload = (await response.json()) as ApiEnvelope<T> | { message?: string };
 
-  if (!response.ok) {
-    throw new Error(payload.message || "Request failed");
+    if (!response.ok) {
+      throw new Error(payload.message || "Request failed");
+    }
+
+    return payload as ApiEnvelope<T>;
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error(`Failed to reach backend at ${getApiBaseUrl()}. Make sure the backend is running and VITE_API_URL is set correctly.`);
+    }
+
+    throw error;
   }
-
-  return payload as ApiEnvelope<T>;
 }

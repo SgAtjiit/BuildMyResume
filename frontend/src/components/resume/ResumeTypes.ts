@@ -17,7 +17,9 @@ export interface Experience {
 export interface Project {
   name: string;
   technologies: string;
-  date: string;
+  date?: string;
+  githubUrl?: string;
+  demoUrl?: string;
   bullets: string[];
 }
 

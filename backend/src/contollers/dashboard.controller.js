@@ -1,5 +1,6 @@
 import { Project } from "../models/project.models.js";
 import { Resume } from "../models/resume.models.js";
+import { Portfolio } from "../models/portfolio.models.js";
 import { findUserByFirebaseUid } from "../services/user.service.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -8,17 +9,31 @@ export const getDashboardSummary = asyncHandler(async (req, res) => {
   const user = await findUserByFirebaseUid(req.auth.uid);
 
   const resumeCount = await Resume.countDocuments({ owner: user._id });
+  const portfolioCount = await Portfolio.countDocuments({ userId: user._id });
+
+  const latestPortfolio = await Portfolio.findOne({ userId: user._id }).sort({ updatedAt: -1 }).lean();
 
   const recentResumes = await Resume.find({ owner: user._id })
     .sort({ updatedAt: -1 })
     .limit(5)
     .select("title updatedAt");
 
-  const recentActivity = recentResumes.map((resume) => ({
-    action: "Updated resume",
-    target: resume.title,
-    time: resume.updatedAt
-  }));
+  const recentActivity = [
+    ...(latestPortfolio?.url
+      ? [
+          {
+            action: "Published portfolio",
+            target: latestPortfolio.customDomain || latestPortfolio.url || latestPortfolio.projectName,
+            time: latestPortfolio.publishedAt || latestPortfolio.updatedAt || new Date()
+          }
+        ]
+      : []),
+    ...recentResumes.map((resume) => ({
+      action: "Updated resume",
+      target: resume.title,
+      time: resume.updatedAt
+    }))
+  ];
 
   return res.status(200).json(
     new ApiResponse(
@@ -27,9 +42,17 @@ export const getDashboardSummary = asyncHandler(async (req, res) => {
         stats: {
           resumes: resumeCount,
           tailoredVersions: resumeCount,
-          portfolios: 0,
+          portfolios: portfolioCount,
           viewsThisWeek: 0
         },
+        activePortfolio: latestPortfolio
+          ? {
+              url: latestPortfolio.url || "",
+              customDomain: latestPortfolio.customDomain || "",
+              projectName: latestPortfolio.projectName || "",
+              publishedAt: latestPortfolio.publishedAt || null
+            }
+          : null,
         recentActivity
       },
       "Dashboard summary fetched successfully"
