@@ -2,6 +2,10 @@ import { Project } from "../models/project.models.js";
 import { Resume } from "../models/resume.models.js";
 import { Portfolio } from "../models/portfolio.models.js";
 import { findUserByFirebaseUid } from "../services/user.service.js";
+import {
+  ensureHttpsUrl,
+  normalizeCloudflarePagesDeploymentUrl
+} from "../services/deployToCloudflare.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -12,6 +16,12 @@ export const getDashboardSummary = asyncHandler(async (req, res) => {
   const portfolioCount = await Portfolio.countDocuments({ userId: user._id });
 
   const latestPortfolio = await Portfolio.findOne({ userId: user._id }).sort({ updatedAt: -1 }).lean();
+  const normalizedPortfolioUrl = latestPortfolio
+    ? normalizeCloudflarePagesDeploymentUrl(latestPortfolio.url, latestPortfolio.projectName)
+    : "";
+  const normalizedCustomDomain = latestPortfolio?.customDomain
+    ? ensureHttpsUrl(latestPortfolio.customDomain)
+    : "";
 
   const recentResumes = await Resume.find({ owner: user._id })
     .sort({ updatedAt: -1 })
@@ -23,7 +33,7 @@ export const getDashboardSummary = asyncHandler(async (req, res) => {
       ? [
           {
             action: "Published portfolio",
-            target: latestPortfolio.customDomain || latestPortfolio.url || latestPortfolio.projectName,
+            target: normalizedCustomDomain || normalizedPortfolioUrl || latestPortfolio.projectName,
             time: latestPortfolio.publishedAt || latestPortfolio.updatedAt || new Date()
           }
         ]
@@ -47,8 +57,8 @@ export const getDashboardSummary = asyncHandler(async (req, res) => {
         },
         activePortfolio: latestPortfolio
           ? {
-              url: latestPortfolio.url || "",
-              customDomain: latestPortfolio.customDomain || "",
+              url: normalizedPortfolioUrl,
+              customDomain: normalizedCustomDomain,
               projectName: latestPortfolio.projectName || "",
               publishedAt: latestPortfolio.publishedAt || null
             }

@@ -9,6 +9,47 @@ const createLogger = (traceId = "") => ({
   error: (event, payload = {}) => console.error("[deployToCloudflare]", { traceId, event, ...payload })
 });
 
+export const getCanonicalCloudflarePagesUrl = (projectName) => `https://${projectName}.pages.dev`;
+
+export const ensureHttpsUrl = (value) => {
+  const trimmedValue = String(value || "").trim();
+
+  if (!trimmedValue) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  return `https://${trimmedValue.replace(/^\/+/, "")}`;
+};
+
+export const normalizeCloudflarePagesDeploymentUrl = (value, projectName = "") => {
+  const normalizedUrl = ensureHttpsUrl(value);
+
+  if (!normalizedUrl || !String(projectName || "").trim()) {
+    return normalizedUrl;
+  }
+
+  const canonicalHost = `${projectName}.pages.dev`;
+
+  try {
+    const parsedUrl = new URL(normalizedUrl);
+
+    if (
+      parsedUrl.hostname === canonicalHost ||
+      parsedUrl.hostname.endsWith(`.${canonicalHost}`)
+    ) {
+      return getCanonicalCloudflarePagesUrl(projectName);
+    }
+  } catch {
+    return normalizedUrl;
+  }
+
+  return normalizedUrl;
+};
+
 const formatAxiosError = (error) => ({
   message: error?.message || "Unknown axios error",
   status: error?.response?.status || null,
@@ -255,14 +296,17 @@ const deployAssets = async (projectName, assets, options = {}) => {
       form,
       { headers }
     );
+    const deploymentUrl = response.data?.result?.url || null;
+    const canonicalUrl = getCanonicalCloudflarePagesUrl(projectName);
 
     logger.info("deploy:success", {
       projectName,
       status: response.status,
-      deploymentUrl: response.data?.result?.url || null
+      deploymentUrl,
+      canonicalUrl
     });
 
-    return response.data?.result?.url || `https://${projectName}.pages.dev`;
+    return canonicalUrl;
   } catch (error) {
     logger.error("deploy:failed", formatAxiosError(error));
     const wrappedError = new Error(getAxiosErrorMessage(error));

@@ -3,6 +3,20 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
 export const getApiBaseUrl = () => (import.meta.env.VITE_API_URL || DEFAULT_API_BASE_URL).replace(/\/$/, "");
 
 export const getBackendOrigin = () => getApiBaseUrl().replace(/\/api\/v1$/i, "");
+export const ensureExternalHttpsUrl = (value: string) => {
+  const trimmedValue = String(value || "").trim();
+
+  if (!trimmedValue) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  return `https://${trimmedValue.replace(/^\/+/, "")}`;
+};
+
 const isBrowserDeployedAgainstLocalhostApi = () =>
   typeof window !== "undefined" &&
   window.location.hostname !== "localhost" &&

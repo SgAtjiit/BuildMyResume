@@ -23,13 +23,12 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/use-auth";
 import { toast } from "sonner";
-import { apiRequest, getBackendOrigin } from "@/lib/api";
+import { apiRequest, ensureExternalHttpsUrl, getBackendOrigin } from "@/lib/api";
 
 // ==========================================
 // TYPES
 // ==========================================
-type DomainSetup = { domain?: string; status?: string; cnameTarget?: string; instructions?: string; };
-type PublishResponse = { success: boolean; url?: string; domainSetup?: DomainSetup | null; error?: string; traceId?: string; details?: string; };
+type PublishResponse = { success: boolean; url?: string; error?: string; traceId?: string; details?: string; };
 type GitHubExportResponse = { success: boolean; repoUrl?: string; owner?: string; repoName?: string; branch?: string; pathPrefix?: string; filesUpdated?: number; createdRepo?: boolean; error?: string; details?: string; traceId?: string; };
 type DashboardSummary = {
   activePortfolio: { url: string; customDomain: string; projectName: string; publishedAt: string | null } | null;
@@ -57,11 +56,9 @@ const Portfolios = () => {
   
   // State
   const [preference, setPreference] = useState<PublishPreference>(DEFAULT_PREFERENCE);
-  const [customDomain, setCustomDomain] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [publishStep, setPublishStep] = useState(0);
   const [liveUrl, setLiveUrl] = useState("");
-  const [domainSetup, setDomainSetup] = useState<DomainSetup | null>(null);
   const [activePortfolio, setActivePortfolio] = useState<DashboardSummary["activePortfolio"]>(null);
   
   // GitHub State
@@ -73,6 +70,8 @@ const Portfolios = () => {
   // Endpoints
   const publishEndpoint = useMemo(() => `${getBackendOrigin()}/portfolio/publish`, []);
   const githubExportEndpoint = useMemo(() => `${getBackendOrigin()}/portfolio/github`, []);
+  const resolvedLiveUrl = ensureExternalHttpsUrl(liveUrl);
+  const resolvedActivePortfolioUrl = ensureExternalHttpsUrl(activePortfolio?.url || "");
 
   useEffect(() => {
     const loadSavedPortfolio = async () => {
@@ -87,7 +86,7 @@ const Portfolios = () => {
         setActivePortfolio(savedPortfolio || null);
 
         if (savedPortfolio?.url) {
-          setLiveUrl(savedPortfolio.customDomain || savedPortfolio.url);
+          setLiveUrl(ensureExternalHttpsUrl(savedPortfolio.url));
         }
       } catch {
         // Ignore background hydration errors; publish action still works.
@@ -128,13 +127,13 @@ const Portfolios = () => {
     }
 
     try {
-      setPublishing(true); setPublishStep(1); setLiveUrl(""); setDomainSetup(null);
+      setPublishing(true); setPublishStep(1); setLiveUrl("");
       const preferencePayload = { theme: preference.theme, font: preference.font, animations: preference.animations, accent: preference.accent, notes: preference.notes.trim() };
       setPublishStep(2);
 
       const response = await fetch(publishEndpoint, {
         method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ preference: preferencePayload, customDomain: customDomain.trim() })
+        body: JSON.stringify({ preference: preferencePayload })
       });
 
       setPublishStep(3);
@@ -146,17 +145,16 @@ const Portfolios = () => {
         return toast.error(`${message}${traceSuffix}`);
       }
 
-      const savedUrl = payload.url || customDomain.trim() || liveUrl;
-      const savedCustomDomain = customDomain.trim();
+      const savedUrl = ensureExternalHttpsUrl(payload.url || "");
 
       setLiveUrl(savedUrl || "");
       setActivePortfolio({
         url: savedUrl || "",
-        customDomain: savedCustomDomain,
+        customDomain: "",
         projectName: activePortfolio?.projectName || "Portfolio",
         publishedAt: new Date().toISOString()
       });
-      setDomainSetup(payload.domainSetup || null); setPublishStep(4);
+      setPublishStep(4);
       toast.success("Portfolio published successfully");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to publish portfolio");
@@ -254,7 +252,12 @@ const Portfolios = () => {
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-3">
-                  <Button variant="outline" onClick={() => activePortfolio?.url && window.open(activePortfolio.url, "_blank")} disabled={!activePortfolio?.url} className="w-full sm:w-auto">
+                  <Button
+                    variant="outline"
+                    onClick={() => resolvedActivePortfolioUrl && window.open(resolvedActivePortfolioUrl, "_blank", "noopener,noreferrer")}
+                    disabled={!resolvedActivePortfolioUrl}
+                    className="w-full sm:w-auto"
+                  >
                     <ExternalLink className="h-4 w-4 mr-2" /> Open Live Site
                   </Button>
                   <Button variant="secondary" onClick={() => navigator.clipboard.writeText(portfolioLabel || "").then(() => toast.success("Portfolio link copied"))} disabled={!portfolioLabel} className="w-full sm:w-auto">
@@ -329,11 +332,6 @@ const Portfolios = () => {
                 <label className="text-xs font-semibold text-foreground ml-1">AI Generation Notes (Optional)</label>
                 <Textarea value={preference.notes} onChange={(e) => setPreference((p) => ({ ...p, notes: e.target.value }))} placeholder="e.g. Make the hero section high-contrast, emphasize open-source contributions, use a grid layout for projects." className="min-h-[100px] bg-background/50 resize-y focus-visible:ring-primary" />
               </div>
-              
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-foreground ml-1">Custom Domain (Optional)</label>
-                <Input value={customDomain} onChange={(e) => setCustomDomain(e.target.value)} placeholder="portfolio.yourname.com" className="bg-background/50 font-mono text-sm focus-visible:ring-primary" />
-              </div>
             </div>
             
             <div className="mt-8 pt-6 border-t border-border/40">
@@ -371,7 +369,7 @@ const Portfolios = () => {
         {/* Side Column: Success States & GitHub Export */}
         <motion.div className="lg:col-span-4 space-y-6" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15 }}>
           <AnimatePresence>
-            {liveUrl && (
+            {resolvedLiveUrl && (
               <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="glass rounded-2xl p-6 border-primary/30 shadow-[0_0_30px_rgba(var(--primary),0.05)] relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none" />
                 
@@ -387,12 +385,12 @@ const Portfolios = () => {
                   <div className="bg-background/60 border border-border/50 rounded-lg p-3 group relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500" />
                     <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1 ml-2">Production URL</p>
-                    <a href={liveUrl} target="_blank" rel="noreferrer" className="text-sm font-mono text-foreground hover:text-primary transition-colors ml-2 break-all line-clamp-2">
-                      {liveUrl}
+                    <a href={resolvedLiveUrl} target="_blank" rel="noreferrer" className="text-sm font-mono text-foreground hover:text-primary transition-colors ml-2 break-all line-clamp-2">
+                      {resolvedLiveUrl}
                     </a>
                   </div>
 
-                  <Button className="w-full" variant="outline" onClick={() => window.open(liveUrl, "_blank")}>
+                  <Button className="w-full" variant="outline" onClick={() => window.open(resolvedLiveUrl, "_blank", "noopener,noreferrer")}>
                     <ExternalLink className="h-4 w-4 mr-2" /> Visit Live Site
                   </Button>
                   
@@ -420,25 +418,6 @@ const Portfolios = () => {
             )}
           </AnimatePresence>
 
-          <AnimatePresence>
-            {domainSetup && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-2xl p-6">
-                <h3 className="font-semibold text-foreground mb-3">Custom Domain Required Actions</h3>
-                <div className="space-y-3 text-xs">
-                  <div className="bg-background/50 p-3 rounded-lg border border-border/40">
-                    <p className="text-muted-foreground mb-1">CNAME Target</p>
-                    <p className="font-mono text-foreground break-all">{domainSetup.cnameTarget || "N/A"}</p>
-                  </div>
-                  {domainSetup.instructions && (
-                    <p className="text-primary bg-primary/10 p-3 rounded-lg flex gap-2">
-                      <LinkIcon className="h-4 w-4 shrink-0 mt-0.5" /> {domainSetup.instructions}
-                    </p>
-                  )}
-                  <p className="text-muted-foreground text-[10px] mt-2">DNS propagation can take up to 24-48 hours globally.</p>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
         </motion.div>
       </div>
 

@@ -5,7 +5,11 @@ import { Project } from "../models/project.models.js";
 import { Portfolio } from "../models/portfolio.models.js";
 import { generatePortfolioProject } from "./generatePortfolio.js";
 import { buildViteProjectToDist } from "./portfolio-build.service.js";
-import { attachCustomDomain, deployPortfolioDist } from "./deployToCloudflare.js";
+import {
+  attachCustomDomain,
+  deployPortfolioDist,
+  normalizeCloudflarePagesDeploymentUrl
+} from "./deployToCloudflare.js";
 
 const createLogger = (traceId = "") => {
   const format = (event, payload = {}) => ({
@@ -123,12 +127,14 @@ export const publishPortfolio = async (userId, userPreference = "", customDomain
     distFileCount: buildOutput.distFiles.length
   });
 
-  const url = await deployPortfolioDist(record.projectName, buildOutput.distFiles, {
+  const deploymentUrl = await deployPortfolioDist(record.projectName, buildOutput.distFiles, {
     traceId: options.traceId || ""
   });
+  const url = normalizeCloudflarePagesDeploymentUrl(deploymentUrl, record.projectName);
 
   logger.info("portfolio:deployed", {
     projectName: record.projectName,
+    deploymentUrl,
     url
   });
 

@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { FileText, Globe, Sparkles, TrendingUp, Activity, ArrowRight, Clock } from "lucide-react";
 import { useAuth } from "@/contexts/use-auth";
 import { useEffect, useMemo, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, ensureExternalHttpsUrl } from "@/lib/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
@@ -67,6 +67,8 @@ const DashboardHome = () => {
 
   const recentActivity = summary?.recentActivity ?? [];
   const activePortfolio = summary?.activePortfolio ?? null;
+  const activePortfolioUrl = ensureExternalHttpsUrl(activePortfolio?.url || "");
+  const activePortfolioLabel = activePortfolio?.customDomain || activePortfolioUrl;
 
   return (
     <div className="page-shell page-shell-xl space-y-8 sm:space-y-10">
@@ -88,7 +90,7 @@ const DashboardHome = () => {
         </div>
       </motion.div>
 
-      {activePortfolio?.url ? (
+      {activePortfolioUrl ? (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -99,7 +101,7 @@ const DashboardHome = () => {
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-primary/80 mb-2">Active Portfolio</p>
               <h2 className="text-lg font-semibold text-foreground">Saved portfolio link</h2>
-              <p className="text-sm text-muted-foreground mt-1 break-all">{activePortfolio.customDomain || activePortfolio.url}</p>
+              <p className="text-sm text-muted-foreground mt-1 break-all">{activePortfolioLabel}</p>
               {activePortfolio.publishedAt ? (
                 <p className="text-xs text-muted-foreground mt-2">
                   Published {new Date(activePortfolio.publishedAt).toLocaleString()}
@@ -108,7 +110,7 @@ const DashboardHome = () => {
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
               <Button variant="outline" onClick={() => navigate("/dashboard/portfolios")} className="w-full sm:w-auto">Manage Portfolio</Button>
-              <Button variant="hero" onClick={() => window.open(activePortfolio.url, "_blank", "noreferrer")} className="w-full sm:w-auto glow-primary">
+              <Button variant="hero" onClick={() => window.open(activePortfolioUrl, "_blank", "noopener,noreferrer")} className="w-full sm:w-auto glow-primary">
                 Open Live Site
               </Button>
             </div>
