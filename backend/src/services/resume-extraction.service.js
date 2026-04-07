@@ -19,6 +19,26 @@ const mask = {
 
 const readTextFile = async (filePath) => fs.readFile(filePath, "utf8");
 
+const isHttpUrl = (value) => /^https?:\/\//i.test(String(value || "").trim());
+
+const readRemotePdfText = async (url) => {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch remote resume: ${response.status}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const parser = new PDFParse({ data: buffer });
+
+  try {
+    const parsed = await parser.getText();
+    return parsed.text || "";
+  } finally {
+    await parser.destroy();
+  }
+};
+
 const readPdfText = async (filePath) => {
   const buffer = await fs.readFile(filePath);
   const parser = new PDFParse({ data: buffer });
@@ -52,11 +72,34 @@ export const extractResumeRawText = async (resume) => {
     return existing;
   }
 
-  if (!resume.filePath) {
+  const filePath = String(resume.filePath || "").trim();
+  const localFallbackPath = resume.storedFileName
+    ? path.join(process.cwd(), "uploads", "resumes", resume.storedFileName)
+    : "";
+
+  if (!filePath && !localFallbackPath) {
     return "";
   }
 
-  const absoluteFilePath = path.join(process.cwd(), resume.filePath.replace(/^\//, ""));
+  if (isHttpUrl(filePath)) {
+    const remoteExtension = path.extname(new URL(filePath).pathname).toLowerCase();
+
+    try {
+      if (remoteExtension === ".pdf") {
+        return await readRemotePdfText(filePath);
+      }
+    } catch {
+      // Fall back to the local upload copy when the remote asset is private or unavailable.
+    }
+
+    if (localFallbackPath) {
+      return extractResumeRawText({ ...resume, filePath: localFallbackPath });
+    }
+
+    return "";
+  }
+
+  const absoluteFilePath = path.join(process.cwd(), filePath.replace(/^\//, ""));
   const extension = path.extname(absoluteFilePath).toLowerCase();
 
   if (extension === ".txt" || extension === ".tex") {

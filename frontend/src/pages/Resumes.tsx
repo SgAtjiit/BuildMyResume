@@ -1,13 +1,14 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, FileText, Eye, Trash2, Download, ChevronUp, Plus, Wand2, ArrowRight, ArrowLeft, Sparkles } from "lucide-react";
+import { FileText, Eye, Trash2, Download, ChevronUp, Plus, Wand2, ArrowRight, ArrowLeft, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/contexts/use-auth";
 import { apiRequest, getBackendOrigin } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter
@@ -43,6 +44,9 @@ type ProjectRow = { name: string; technologies: string; githubUrl: string; demoU
 type AchievementRow = { title: string; date: string; bulletText: string; };
 type LayoutMode = "COMPACT" | "EXHAUSTIVE";
 type OptimizedLayout = { layout: LayoutMode; maxProjectBullets: number; skillFormat: "INLINE" | "GRID"; fontScaling: number; lineHeight: number; sectionGap: number; };
+
+const resolveResumeFileUrl = (filePath: string) =>
+  /^https?:\/\//i.test(filePath) ? filePath : `${getBackendOrigin()}${filePath}`;
 type GeneratorTarget =
   | { kind: "experience"; index: number }
   | { kind: "achievement"; index: number }
@@ -61,6 +65,9 @@ const PROJECT_BULLET_WRAP_WIDTH = 526;
 const PROJECT_BULLET_FONT_SIZE = 10;
 
 const parseBullets = (value: string) => value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+const resumeDebug = (event: string, payload?: unknown) => {
+  console.info(`[resume-debug][frontend] ${event}`, payload ?? {});
+};
 
 // ==========================================
 // PDF LOGIC (Preserved Exactly)
@@ -142,12 +149,13 @@ const Resumes = () => {
   const [deletingAllResumes, setDeletingAllResumes] = useState(false);
   
   // Upload State
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
   const [showTitleDialog, setShowTitleDialog] = useState(false);
   const [resumeTitle, setResumeTitle] = useState("");
-  const [saveTitleMode, setSaveTitleMode] = useState<"upload" | "jake" | null>(null);
+  const [saveTitleMode, setSaveTitleMode] = useState<"jake" | null>(null);
   const [expandedResumeId, setExpandedResumeId] = useState<string | null>(null);
+  const [resumeBlobUrls, setResumeBlobUrls] = useState<Record<string, string>>({});
+  const [loadingResumeFileId, setLoadingResumeFileId] = useState<string | null>(null);
+  const resumeBlobUrlsRef = useRef<Record<string, string>>({});
 
   // Builder State
   const [showBuilder, setShowBuilder] = useState(false);
@@ -186,31 +194,120 @@ const Resumes = () => {
   const fetchResumes = useCallback(async () => {
     if (!idToken) { setResumes([]); setLoading(false); return; }
     try {
+      resumeDebug("fetchResumes:start", { hasToken: Boolean(idToken) });
       const response = await apiRequest<{ resumes: ResumeItem[] }>("/resumes", { token: idToken });
+      resumeDebug("fetchResumes:success", {
+        count: response.data.resumes.length,
+        items: response.data.resumes.map((resume) => ({
+          id: resume._id,
+          title: resume.title,
+          format: resume.format,
+          filePath: resume.filePath
+        }))
+      });
       setResumes(response.data.resumes);
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to load resumes"); } 
+    } catch (error) {
+      resumeDebug("fetchResumes:error", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      toast.error(error instanceof Error ? error.message : "Failed to load resumes");
+    } 
     finally { setLoading(false); }
   }, [idToken]);
 
   useEffect(() => { void fetchResumes(); }, [fetchResumes]);
+  useEffect(() => () => {
+    Object.values(resumeBlobUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+  }, []);
+  useEffect(() => {
+    if (!resumes.length) {
+      return;
+    }
 
-  // Upload Handlers
-  const handleFileSelected = (file: File) => {
-    setSelectedFile(file); setResumeTitle(file.name.replace(/\.[^.]+$/, "")); setSaveTitleMode("upload"); setShowTitleDialog(true);
-  };
+    resumeDebug("resumes:state-updated", {
+      count: resumes.length,
+      items: resumes.map((resume) => ({
+        id: resume._id,
+        title: resume.title,
+        format: resume.format,
+        filePath: resume.filePath
+      }))
+    });
+  }, [resumes]);
 
-  const handleUploadWithTitle = async () => {
-    if (!idToken || !selectedFile || !resumeTitle.trim()) return;
+  const cacheResumeBlobUrl = useCallback((resumeId: string, nextUrl: string) => {
+    const previousUrl = resumeBlobUrlsRef.current[resumeId];
+
+    if (previousUrl && previousUrl !== nextUrl) {
+      URL.revokeObjectURL(previousUrl);
+    }
+
+    resumeBlobUrlsRef.current = {
+      ...resumeBlobUrlsRef.current,
+      [resumeId]: nextUrl
+    };
+    setResumeBlobUrls((current) => ({
+      ...current,
+      [resumeId]: nextUrl
+    }));
+  }, []);
+
+  const fetchResumeBlobUrl = useCallback(async (resume: ResumeItem) => {
+    if (!idToken || !resume.filePath) {
+      throw new Error("Resume file is not available");
+    }
+
+    const cachedUrl = resumeBlobUrlsRef.current[resume._id];
+    if (cachedUrl) {
+      return cachedUrl;
+    }
+
+    const targetUrl = resolveResumeFileUrl(resume.filePath);
+
+    resumeDebug("resumeFile:fetch:start", {
+      resumeId: resume._id,
+      title: resume.title,
+      originalPath: resume.filePath,
+      targetUrl
+    });
+
+    setLoadingResumeFileId(resume._id);
+
     try {
-      setUploading(true);
-      const formData = new FormData(); formData.append("title", resumeTitle.trim()); formData.append("resumeFile", selectedFile);
-      await apiRequest<{ resume: ResumeItem }>("/resumes", { method: "POST", token: idToken, body: formData });
-      toast.success("Resume uploaded successfully");
-      setSelectedFile(null); setResumeTitle(""); setShowTitleDialog(false); setSaveTitleMode(null);
-      await fetchResumes();
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to upload resume"); } 
-    finally { setUploading(false); }
-  };
+      const response = await fetch(targetUrl, {
+        headers: {
+          Authorization: `Bearer ${idToken}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load resume file (${response.status})`);
+      }
+
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      cacheResumeBlobUrl(resume._id, blobUrl);
+
+      resumeDebug("resumeFile:fetch:success", {
+        resumeId: resume._id,
+        status: response.status,
+        contentType: response.headers.get("content-type"),
+        blobSize: blob.size
+      });
+
+      return blobUrl;
+    } catch (error) {
+      resumeDebug("resumeFile:fetch:error", {
+        resumeId: resume._id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    } finally {
+      setLoadingResumeFileId((current) => (current === resume._id ? null : current));
+    }
+  }, [cacheResumeBlobUrl, idToken]);
+
+  // Upload Handlers (removed)
 
   // Builder Handlers
   const fetchProjects = useCallback(async () => {
@@ -294,7 +391,19 @@ const Resumes = () => {
   const addSkillSection = () => setSkillSections((c) => [...c, { title: "New Section", skills: [emptySkillRow] }]);
   const removeSkillSection = (sIdx: number) => setSkillSections((c) => { const next = c.filter((_, i) => i !== sIdx); return next.length ? next : defaultSkillSections(); });
 
-  const applyStepData = () => { const snapshot = buildResumeDataSnapshot(); setResumeData(snapshot); return snapshot; };
+  const applyStepData = () => {
+    const snapshot = buildResumeDataSnapshot();
+    resumeDebug("applyStepData:snapshot", {
+      name: snapshot.name,
+      educationCount: snapshot.education?.length ?? 0,
+      experienceCount: snapshot.experience?.length ?? 0,
+      projectCount: snapshot.projects?.length ?? 0,
+      achievementCount: snapshot.achievements?.length ?? 0,
+      skillLineCount: getRenderableSkillLines(snapshot).length
+    });
+    setResumeData(snapshot);
+    return snapshot;
+  };
 
   // PDF Generation Pipeline
   const getPreviewConfig = (data: ResumeData): PreviewLayoutConfig => {
@@ -303,6 +412,16 @@ const Resumes = () => {
   };
 
   const generateResumePdfBlobFallback = async (data: ResumeData, config: PreviewLayoutConfig) => {
+    resumeDebug("generateResumePdfBlob:start", {
+      name: data.name,
+      config,
+      educationCount: data.education?.length ?? 0,
+      experienceCount: data.experience?.length ?? 0,
+      projectCount: data.projects?.length ?? 0,
+      achievementCount: data.achievements?.length ?? 0,
+      skillLineCount: getRenderableSkillLines(data).length
+    });
+
     const layout = config.layout || "COMPACT"; const headerScale = config.headerScale ?? 1; const sectionGap = config.sectionGap ?? 15; const lineHeightFactor = config.lineHeight ?? 1.15; const maxProjectBullets = config.maxProjectBullets ?? 3;
     const doc = new jsPDF({ unit: "pt", format: "letter" }); await ensurePdfSerifFont(doc);
     let y = 36; const left = 36; const contentWidth = 540; const centerX = doc.internal.pageSize.getWidth() / 2; const lineBase = Math.round(13 * lineHeightFactor);
@@ -454,7 +573,17 @@ const Resumes = () => {
 
     const totalPages = doc.getNumberOfPages();
     if (totalPages > 1) { for (let page = totalPages; page >= 2; page -= 1) doc.deletePage(page); }
-    return new Blob([doc.output("arraybuffer")], { type: "application/pdf" });
+    const pdfArrayBuffer = doc.output("arraybuffer");
+    const blob = new Blob([pdfArrayBuffer], { type: "application/pdf" });
+
+    resumeDebug("generateResumePdfBlob:done", {
+      totalPagesBeforeTrim: totalPages,
+      finalPageCount: doc.getNumberOfPages(),
+      blobSize: blob.size,
+      blobType: blob.type
+    });
+
+    return blob;
   };
 
   const generateResumePdfBlob = async (data: ResumeData, config: PreviewLayoutConfig) => generateResumePdfBlobFallback(data, config);
@@ -492,24 +621,114 @@ const Resumes = () => {
     try {
       setSavingBuilderResume(true);
       const title = resumeTitle.trim();
+      const traceId = `frontend-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      resumeDebug("handleJakeSaveWithTitle:start", {
+        traceId,
+        title,
+        previewConfig
+      });
+
       const pdfBlob = await generateResumePdfBlob(snapshot, previewConfig);
       const sections = [ snapshot.professionalSummary?.trim(), (snapshot.education?.length ?? 0) > 0, (snapshot.experience?.length ?? 0) > 0, (snapshot.projects?.length ?? 0) > 0, (snapshot.achievements?.length ?? 0) > 0, getRenderableSkillLines(snapshot).length > 0 ].filter(Boolean).length;
+
+      resumeDebug("handleJakeSaveWithTitle:pdf-ready", {
+        traceId,
+        blobSize: pdfBlob.size,
+        blobType: pdfBlob.type,
+        sections,
+        sectionsByType: {
+          professionalSummary: Boolean(snapshot.professionalSummary?.trim()),
+          education: (snapshot.education?.length ?? 0) > 0,
+          experience: (snapshot.experience?.length ?? 0) > 0,
+          projects: (snapshot.projects?.length ?? 0) > 0,
+          achievements: (snapshot.achievements?.length ?? 0) > 0,
+          skills: getRenderableSkillLines(snapshot).length > 0
+        }
+      });
       
       const formData = new FormData(); formData.append("title", title); formData.append("sections", String(sections)); formData.append("resumeFile", new File([pdfBlob], `${title}.pdf`, { type: "application/pdf" }));
-      await apiRequest<{ resume: ResumeItem }>("/resumes", { method: "POST", token: idToken, body: formData });
+      formData.append("debugTraceId", traceId);
+      const saveResponse = await apiRequest<{ resume: ResumeItem }>("/resumes", { method: "POST", token: idToken, body: formData });
+      resumeDebug("handleJakeSaveWithTitle:save-success", {
+        traceId,
+        savedResume: {
+          id: saveResponse.data.resume._id,
+          title: saveResponse.data.resume.title,
+          format: saveResponse.data.resume.format,
+          filePath: saveResponse.data.resume.filePath
+        }
+      });
       
       toast.success("Jake resume saved as PDF");
       setShowBuilder(false); setShowTitleDialog(false); setSaveTitleMode(null); setResumeTitle("");
       await fetchResumes();
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to save resume"); } 
+    } catch (error) {
+      resumeDebug("handleJakeSaveWithTitle:error", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      toast.error(error instanceof Error ? error.message : "Failed to save resume");
+    } 
     finally { setSavingBuilderResume(false); }
   };
 
   // List Item Actions
-  const handleViewResume = (id: string) => setExpandedResumeId(expandedResumeId === id ? null : id);
+  const handleViewResume = async (resume: ResumeItem) => {
+    const nextId = expandedResumeId === resume._id ? null : resume._id;
+    resumeDebug("handleViewResume:toggle", {
+      id: resume._id,
+      nextId,
+      title: resume.title,
+      format: resume.format,
+      filePath: resume.filePath
+    });
+    setExpandedResumeId(nextId);
+
+    if (!nextId || !resume.filePath) {
+      return;
+    }
+
+    try {
+      await fetchResumeBlobUrl(resume);
+    } catch (error) {
+      setExpandedResumeId(null);
+      toast.error(error instanceof Error ? error.message : "Failed to load resume file");
+    }
+  };
+  const handleOpenResumeExternal = async (resume: ResumeItem) => {
+    if (!resume.filePath) {
+      return;
+    }
+
+    try {
+      const blobUrl = await fetchResumeBlobUrl(resume);
+      resumeDebug("viewer:open-external", {
+        resumeId: resume._id,
+        title: resume.title,
+        originalPath: resume.filePath,
+        blobUrl
+      });
+      window.open(blobUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to open resume");
+    }
+  };
   const handleDeleteResume = async (id: string) => {
     if (!idToken) return;
-    try { await apiRequest<{ resumeId: string }>(`/resumes/${id}`, { method: "DELETE", token: idToken }); setResumes((c) => c.filter((i) => i._id !== id)); toast.success("Resume deleted"); } 
+    try {
+      await apiRequest<{ resumeId: string }>(`/resumes/${id}`, { method: "DELETE", token: idToken });
+      const cachedBlobUrl = resumeBlobUrlsRef.current[id];
+      if (cachedBlobUrl) {
+        URL.revokeObjectURL(cachedBlobUrl);
+        delete resumeBlobUrlsRef.current[id];
+        setResumeBlobUrls((current) => {
+          const next = { ...current };
+          delete next[id];
+          return next;
+        });
+      }
+      setResumes((c) => c.filter((i) => i._id !== id));
+      toast.success("Resume deleted");
+    } 
     catch (error) { toast.error(error instanceof Error ? error.message : "Failed to delete resume"); }
   };
 
@@ -655,7 +874,6 @@ const Resumes = () => {
       context: [
         `Project name: ${row.name || "N/A"}`,
         `Technologies: ${row.technologies || "N/A"}`,
-        `Date: ${row.date || "N/A"}`,
         `Current bullets: ${row.bulletText || "N/A"}`
       ].join("\n"),
       onApply: (value: string) => updateRow(setProjectRows, generatorTarget.index, { bulletText: value })
@@ -675,32 +893,31 @@ const Resumes = () => {
             <Button variant="hero-outline" onClick={() => void openJakeBuilder()} disabled={builderLoading} className="w-full md:w-auto">
               <Wand2 className="h-4 w-4 mr-2 text-primary" /> {builderLoading ? "Loading..." : "Jake Builder"}
             </Button>
-            <Button variant="hero" onClick={() => document.getElementById("resume-upload-input")?.click()} disabled={uploading} className="w-full sm:w-auto glow-primary">
-              <Upload className="h-4 w-4 mr-2" /> {uploading ? "Uploading..." : "Upload File"}
-            </Button>
+
           </div>
         </div>
       </motion.div>
 
-      {/* Upload Dropzone */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-        className="glass rounded-2xl border-2 border-dashed border-primary/20 hover:border-primary/50 transition-all p-6 sm:p-8 lg:p-12 text-center cursor-pointer group relative overflow-hidden"
-        onClick={() => document.getElementById("resume-upload-input")?.click()}
-      >
-        <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-        <div className="relative z-10 flex flex-col items-center justify-center">
-          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-            <Upload className="h-8 w-8 text-primary" />
+      {/* Jake Builder Info Card */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+        <div className="glass rounded-2xl border border-primary/10 bg-gradient-to-br from-primary/5 to-primary/0 p-6 sm:p-8">
+          <div className="flex gap-4 sm:gap-6">
+            <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-xl bg-primary/20 flex items-center justify-center shrink-0">
+              <Wand2 className="h-6 w-6 sm:h-7 sm:w-7 text-primary" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg sm:text-xl font-bold text-foreground mb-2">Create Resume with Jake Builder</h3>
+              <p className="text-sm sm:text-base text-muted-foreground leading-relaxed mb-4">
+                Build a professional, ATS-optimized resume from scratch. Answer simple questions about your education, experience, projects, and skills. Jake Builder generates a beautifully formatted PDF with AI-powered content suggestions.
+              </p>
+              <div className="flex flex-wrap gap-2 sm:gap-3">
+                <div className="text-xs sm:text-sm text-muted-foreground bg-background/50 px-3 py-1.5 rounded-full border border-border/50">✓ ATS-Optimized</div>
+                <div className="text-xs sm:text-sm text-muted-foreground bg-background/50 px-3 py-1.5 rounded-full border border-border/50">✓ AI Assistance</div>
+                <div className="text-xs sm:text-sm text-muted-foreground bg-background/50 px-3 py-1.5 rounded-full border border-border/50">✓ One-Page Format</div>
+              </div>
+            </div>
           </div>
-          <p className="text-lg font-medium text-foreground mb-1">Click to drop a document here</p>
-          <p className="text-sm text-muted-foreground">Supports PDF, DOCX, TXT, TEX, or images up to 10MB</p>
-          {selectedFile && <p className="text-sm font-semibold text-primary mt-3 bg-primary/10 px-3 py-1 rounded-full">Ready: {selectedFile.name}</p>}
         </div>
-        <input
-          id="resume-upload-input" type="file" accept=".pdf,.docx,.doc,.txt,.tex,.png,.jpg,.jpeg,.webp" className="hidden"
-          onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFileSelected(file); }}
-        />
       </motion.div>
 
       {/* Resume List */}
@@ -719,7 +936,7 @@ const Resumes = () => {
         {loading ? (
           <div className="text-sm text-muted-foreground animate-pulse">Fetching documents...</div>
         ) : resumes.length === 0 ? (
-          <div className="glass rounded-xl p-8 text-center text-muted-foreground">No resumes found. Create or upload one above.</div>
+          <div className="glass rounded-xl p-8 text-center text-muted-foreground">No resumes found. Create one using Jake Builder.</div>
         ) : (
           <AnimatePresence>
             {resumes.map((r, i) => (
@@ -745,7 +962,7 @@ const Resumes = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity w-full sm:w-auto">
-                    <Button variant="secondary" size="sm" onClick={() => handleViewResume(r._id)} className="h-9 hover:bg-primary/10 hover:text-primary">
+                    <Button variant="secondary" size="sm" onClick={() => void handleViewResume(r)} className="h-9 hover:bg-primary/10 hover:text-primary">
                       {expandedResumeId === r._id ? <><ChevronUp className="h-4 w-4 mr-2" /> Close</> : <><Eye className="h-4 w-4 mr-2" /> View</>}
                     </Button>
                     <Button variant="ghost" size="icon" onClick={() => handleDeleteResume(r._id)} className="h-9 w-9 hover:bg-destructive/10 hover:text-destructive">
@@ -762,12 +979,40 @@ const Resumes = () => {
                         <div className="space-y-4">
                           <div className="flex items-center justify-between">
                             <p className="text-sm font-semibold text-foreground">Document Viewer</p>
-                            <Button size="sm" variant="hero-outline" onClick={() => window.open(`${getBackendOrigin()}${r.filePath}`, "_blank")}>
+                            <Button
+                              size="sm"
+                              variant="hero-outline"
+                              onClick={() => void handleOpenResumeExternal(r)}
+                            >
                               <Download className="h-4 w-4 mr-2" /> Open External
                             </Button>
                           </div>
                           {r.format === "PDF" ? (
-                            <iframe src={`${getBackendOrigin()}${r.filePath}`} title="preview" className="w-full h-[70vh] md:h-[600px] rounded-xl border border-border/50 bg-white shadow-inner" />
+                            resumeBlobUrls[r._id] ? (
+                              <iframe
+                                src={resumeBlobUrls[r._id]}
+                                title="preview"
+                                className="w-full h-[70vh] md:h-[600px] rounded-xl border border-border/50 bg-white shadow-inner"
+                                onLoad={() => {
+                                  resumeDebug("viewer:iframe-load", {
+                                    resumeId: r._id,
+                                    title: r.title,
+                                    src: resumeBlobUrls[r._id]
+                                  });
+                                }}
+                                onError={() => {
+                                  resumeDebug("viewer:iframe-error", {
+                                    resumeId: r._id,
+                                    title: r.title,
+                                    src: resumeBlobUrls[r._id]
+                                  });
+                                }}
+                              />
+                            ) : (
+                              <div className="flex flex-col items-center justify-center h-[70vh] md:h-[600px] rounded-xl border border-border/50 bg-white shadow-inner text-sm text-muted-foreground">
+                                {loadingResumeFileId === r._id ? "Loading PDF preview..." : "Preparing PDF preview..."}
+                              </div>
+                            )
                           ) : (
                             <div className="flex flex-col items-center justify-center p-12 bg-background/50 rounded-xl border border-border/50 text-center">
                               <FileText className="h-10 w-10 text-muted-foreground mb-3" />
@@ -796,15 +1041,18 @@ const Resumes = () => {
       <Dialog open={showTitleDialog} onOpenChange={(open) => { setShowTitleDialog(open); if (!open) setSaveTitleMode(null); }}>
         <DialogContent className="glass border-border/50 w-[calc(100vw-1rem)] sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{saveTitleMode === "jake" ? "Name Your Jake Resume" : "Name Your Upload"}</DialogTitle>
+            <DialogTitle>Name Your Jake Resume</DialogTitle>
+            <DialogDescription>
+              Choose a title for the generated PDF before saving it to your resume library.
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <Input value={resumeTitle} onChange={(e) => setResumeTitle(e.target.value)} placeholder="e.g. Master Resume 2026" className="bg-background/50" autoFocus onKeyDown={(e) => e.key === "Enter" && (saveTitleMode === "jake" ? handleJakeSaveWithTitle() : handleUploadWithTitle())} />
+            <Input value={resumeTitle} onChange={(e) => setResumeTitle(e.target.value)} placeholder="e.g. Master Resume 2026" className="bg-background/50" autoFocus onKeyDown={(e) => e.key === "Enter" && handleJakeSaveWithTitle()} />
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => { setShowTitleDialog(false); setSaveTitleMode(null); }}>Cancel</Button>
-            <Button className="glow-primary" onClick={() => saveTitleMode === "jake" ? handleJakeSaveWithTitle() : handleUploadWithTitle()} disabled={uploading || savingBuilderResume || !resumeTitle.trim()}>
-              {saveTitleMode === "jake" ? (savingBuilderResume ? "Saving PDF..." : "Generate PDF") : uploading ? "Uploading..." : "Save"}
+            <Button className="glow-primary" onClick={() => handleJakeSaveWithTitle()} disabled={savingBuilderResume || !resumeTitle.trim()}>
+              {savingBuilderResume ? "Saving PDF..." : "Generate PDF"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -813,6 +1061,9 @@ const Resumes = () => {
       {/* Jake Builder Modal */}
       <Dialog open={showBuilder} onOpenChange={setShowBuilder}>
         <DialogContent className="glass border-border/50 w-[calc(100vw-0.75rem)] sm:max-w-5xl max-h-[calc(100vh-0.75rem)] overflow-hidden flex flex-col p-0">
+          <DialogDescription className="sr-only">
+            Build and save a one-page resume by filling in your contact details, education, experience, projects, achievements, and skills.
+          </DialogDescription>
           
           {/* Builder Header */}
           <div className="p-4 sm:p-6 border-b border-border/40 bg-background/20">

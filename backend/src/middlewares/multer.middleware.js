@@ -1,5 +1,6 @@
 import multer from "multer";
 import path from "path";
+import fs from "fs/promises";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 
@@ -9,8 +10,13 @@ const __dirname = path.dirname(__filename);
 const uploadDir = path.resolve(__dirname, "../../uploads/resumes");
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, callback) => {
-    callback(null, uploadDir);
+  destination: async (_req, _file, callback) => {
+    try {
+      await fs.mkdir(uploadDir, { recursive: true });
+      callback(null, uploadDir);
+    } catch (error) {
+      callback(error);
+    }
   },
   filename: (_req, file, callback) => {
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");

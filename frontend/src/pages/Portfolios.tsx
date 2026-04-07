@@ -53,7 +53,7 @@ const DEFAULT_GITHUB_EXPORT_FORM: GitHubExportForm = { token: "", repoOwner: "",
 // MAIN COMPONENT
 // ==========================================
 const Portfolios = () => {
-  const { idToken } = useAuth();
+  const { idToken, backendUser } = useAuth();
   
   // State
   const [preference, setPreference] = useState<PublishPreference>(DEFAULT_PREFERENCE);
@@ -97,9 +97,35 @@ const Portfolios = () => {
     void loadSavedPortfolio();
   }, [idToken]);
 
+  // Validators
+  const canPublish = () => {
+    if (!idToken || !backendUser) return false;
+    if (!backendUser.displayName?.trim()) return false;
+    if (!backendUser.email && !backendUser.displayName) return false;
+    
+    const hasProjects = (backendUser.experience?.length ?? 0) > 0;
+    const hasEducation = (backendUser.education?.length ?? 0) > 0 || (backendUser.educationEntries?.length ?? 0) > 0;
+    const hasSkills = (backendUser.skillLanguages?.length ?? 0) > 0 || (backendUser.skillFrameworks?.length ?? 0) > 0 || (backendUser.skillTools?.length ?? 0) > 0 || (backendUser.skillLibraries?.length ?? 0) > 0 || (backendUser.skillSections?.length ?? 0) > 0;
+    
+    return hasProjects || hasEducation || hasSkills;
+  };
+
   // Handlers
   const handlePublish = async () => {
+    // Validation checks
     if (!idToken) return toast.error("Please sign in first");
+    if (!backendUser) return toast.error("Profile data is loading. Please wait.");
+    if (!backendUser.email && !backendUser.displayName) return toast.error("Please update your profile with at least an email or name");
+    if (!backendUser.displayName?.trim()) return toast.error("Display name is required");
+    
+    // Check if user has some profile content
+    const hasProjects = (backendUser.experience?.length ?? 0) > 0;
+    const hasEducation = (backendUser.education?.length ?? 0) > 0 || (backendUser.educationEntries?.length ?? 0) > 0;
+    const hasSkills = (backendUser.skillLanguages?.length ?? 0) > 0 || (backendUser.skillFrameworks?.length ?? 0) > 0 || (backendUser.skillTools?.length ?? 0) > 0 || (backendUser.skillLibraries?.length ?? 0) > 0 || (backendUser.skillSections?.length ?? 0) > 0;
+    
+    if (!hasProjects && !hasEducation && !hasSkills) {
+      return toast.error("Add some content to your profile (experience, education, or skills) before publishing");
+    }
 
     try {
       setPublishing(true); setPublishStep(1); setLiveUrl(""); setDomainSetup(null);
@@ -186,7 +212,7 @@ const Portfolios = () => {
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl sm:text-4xl font-extrabold text-gradient mb-2 tracking-tight">Deploy Portfolio</h1>
-          <p className="text-muted-foreground text-base sm:text-lg max-w-2xl">Generate and deploy your personal site to Cloudflare Pages instantly.</p>
+          <p className="text-muted-foreground text-base sm:text-lg max-w-2xl">Get Deployed URL for your Personal Portfolio Website.</p>
         </div>
         <Badge variant="secondary" className="self-start md:self-auto bg-primary/10 text-primary border-primary/20 px-3 py-1.5 text-xs font-medium">1-Click CI/CD</Badge>
       </motion.div>
@@ -202,9 +228,7 @@ const Portfolios = () => {
             <p className="text-sm font-semibold text-foreground">Automated Deployment Pipeline</p>
             <p className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
               <span className="font-mono bg-background/50 px-1 rounded">Profile Data</span> → 
-              <span className="font-mono bg-background/50 px-1 rounded">React Gen</span> → 
-              <span className="font-mono bg-background/50 px-1 rounded">Vite Build</span> → 
-              <span className="font-mono bg-background/50 px-1 rounded">Cloudflare Deploy</span>
+              <span className="font-mono bg-background/50 px-1 rounded">Deployed URL of your Portfolio website </span>
             </p>
           </div>
         </div>
@@ -313,8 +337,8 @@ const Portfolios = () => {
             </div>
             
             <div className="mt-8 pt-6 border-t border-border/40">
-              <Button onClick={handlePublish} disabled={publishing || !idToken} className="w-full h-12 text-base font-semibold glow-primary shadow-primary/25 hover:brightness-110 transition-all">
-                <Rocket className="h-5 w-5 mr-2" /> {publishing ? "Initializing Pipeline..." : "Build & Publish Portfolio"}
+              <Button onClick={handlePublish} disabled={publishing || !canPublish()} className="w-full h-12 text-base font-semibold glow-primary shadow-primary/25 hover:brightness-110 transition-all">
+                <Rocket className="h-5 w-5 mr-2" /> {publishing ? "Building..." : "Build & Publish"}
               </Button>
             </div>
           </div>

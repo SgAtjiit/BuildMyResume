@@ -29,6 +29,7 @@ type ResumeItem = {
   content: string;
   format: "PDF" | "DOCX" | "TXT" | "TEX" | "IMAGE";
   originalFileName?: string;
+  filePath?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -131,6 +132,9 @@ const compactBullets = (items: string[], maxCount = 3) => uniqueStrings(items.ma
 const compactProjectTechnologies = (tech: string) => uniqueStrings(tech.split(/[,/|]/).map(cleanResumeText).filter(Boolean)).slice(0, 4).join(", ");
 const compactProjectTitle = (title: string) => cleanResumeText(title).replace(/\s*\|\s*$/, "");
 const compactProjectDescription = (desc: string) => cleanResumeText(desc).replace(/\.$/, "");
+const aiTailorDebug = (event: string, payload?: unknown) => {
+  console.info(`[resume-debug][ai-tailor] ${event}`, payload ?? {});
+};
 
 // ==========================================
 // PDF GENERATION LOGIC
@@ -338,18 +342,47 @@ const AiTailor = () => {
     if (!idToken || !generatedPreview || !saveResumeTitle.trim()) return;
     setSavingFinal(true);
     try {
+      const traceId = `ai-tailor-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const sectionsCount = [ generatedPreview.education?.length, generatedPreview.experience?.length, generatedPreview.projects?.length, generatedPreview.achievements?.length, (generatedPreview.skills?.languages?.length || generatedPreview.skills?.frameworks?.length) ].filter(Boolean).length;
+      aiTailorDebug("handleSaveFinalResume:start", {
+        traceId,
+        title: saveResumeTitle.trim(),
+        sectionsCount,
+        educationCount: generatedPreview.education?.length ?? 0,
+        experienceCount: generatedPreview.experience?.length ?? 0,
+        projectCount: generatedPreview.projects?.length ?? 0,
+        achievementCount: generatedPreview.achievements?.length ?? 0,
+        skillLanguagesCount: generatedPreview.skills?.languages?.length ?? 0
+      });
       
       const pdfBlob = await generateResumePdfBlob(generatedPreview);
+      aiTailorDebug("handleSaveFinalResume:pdf-ready", {
+        traceId,
+        blobSize: pdfBlob.size,
+        blobType: pdfBlob.type
+      });
       const formData = new FormData();
       formData.append("title", saveResumeTitle.trim());
       formData.append("sections", String(Math.max(sectionsCount, 1)));
       formData.append("resumeFile", new File([pdfBlob], `${saveResumeTitle.trim()}.pdf`, { type: "application/pdf" }));
+      formData.append("debugTraceId", traceId);
 
-      await apiRequest<ResumeSaveResponse>("/resumes", { method: "POST", token: idToken, body: formData });
+      const saveResponse = await apiRequest<ResumeSaveResponse>("/resumes", { method: "POST", token: idToken, body: formData });
+      aiTailorDebug("handleSaveFinalResume:save-success", {
+        traceId,
+        savedResume: {
+          id: saveResponse.data.resume._id,
+          title: saveResponse.data.resume.title,
+          format: saveResponse.data.resume.format,
+          filePath: saveResponse.data.resume.filePath
+        }
+      });
       toast.success("Final tailored resume saved as PDF.");
       setShowSaveTitleDialog(false); setSaveResumeTitle(""); await fetchResumes();
     } catch (error) {
+      aiTailorDebug("handleSaveFinalResume:error", {
+        error: error instanceof Error ? error.message : String(error)
+      });
       toast.error(error instanceof Error ? error.message : "Failed to save final resume");
     } finally {
       setSavingFinal(false);

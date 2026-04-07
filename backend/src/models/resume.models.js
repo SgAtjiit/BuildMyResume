@@ -52,6 +52,21 @@ const resumeSchema = new mongoose.Schema(
     fileSize: {
       type: Number,
       default: 0
+    },
+    cloudinaryPublicId: {
+      type: String,
+      trim: true,
+      default: ""
+    },
+    cloudinaryUrl: {
+      type: String,
+      trim: true,
+      default: ""
+    },
+    cloudinaryResourceType: {
+      type: String,
+      trim: true,
+      default: ""
     }
   },
   {

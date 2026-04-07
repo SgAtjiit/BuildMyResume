@@ -17,6 +17,11 @@ const envSchema = z.object({
 
   GROQ_API_KEY: z.string().min(1, "GROQ_API_KEY is required"),
   GROQ_MODEL: z.string().default("llama-3.3-70b-versatile"),
+
+  CLOUDINARY_CLOUD_NAME: z.string().optional().default(""),
+  CLOUDINARY_API_KEY: z.string().optional().default(""),
+  CLOUDINARY_API_SECRET: z.string().optional().default(""),
+  CLOUDINARY_RESUME_FOLDER: z.string().default("buildmyresume/resumes"),
   // LATEX_BIN_DIR: z.string().optional().default(""),
 
   // VERCEL_OAUTH_CLIENT_ID: z.string().optional().default(""),
