@@ -1,28 +1,5 @@
 import multer from "multer";
 import path from "path";
-import fs from "fs/promises";
-import { fileURLToPath } from "url";
-import { randomUUID } from "crypto";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const uploadDir = path.resolve(__dirname, "../../uploads/resumes");
-
-const storage = multer.diskStorage({
-  destination: async (_req, _file, callback) => {
-    try {
-      await fs.mkdir(uploadDir, { recursive: true });
-      callback(null, uploadDir);
-    } catch (error) {
-      callback(error);
-    }
-  },
-  filename: (_req, file, callback) => {
-    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-    callback(null, `${Date.now()}-${randomUUID()}-${safeName}`);
-  }
-});
 
 const fileFilter = (_req, file, callback) => {
   const extension = path.extname(file.originalname).toLowerCase();
@@ -48,7 +25,7 @@ const fileFilter = (_req, file, callback) => {
 };
 
 export const resumeUpload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter,
   limits: { fileSize: 10 * 1024 * 1024 }
 });

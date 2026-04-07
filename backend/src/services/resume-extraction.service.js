@@ -3,6 +3,10 @@ import path from "path";
 import { createRequire } from "module";
 import mammoth from "mammoth";
 import { createWorker } from "tesseract.js";
+import {
+  downloadResumeFromFirebaseStorage,
+  resolveFirebaseResumeStorageLocation
+} from "../utils/firebase-storage.js";
 
 const require = createRequire(import.meta.url);
 const { PDFParse } = require("pdf-parse");
@@ -18,17 +22,9 @@ const mask = {
 };
 
 const readTextFile = async (filePath) => fs.readFile(filePath, "utf8");
+const readTextBuffer = async (buffer) => buffer.toString("utf8");
 
-const isHttpUrl = (value) => /^https?:\/\//i.test(String(value || "").trim());
-
-const readRemotePdfText = async (url) => {
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch remote resume: ${response.status}`);
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
+const readPdfBuffer = async (buffer) => {
   const parser = new PDFParse({ data: buffer });
 
   try {
@@ -41,19 +37,27 @@ const readRemotePdfText = async (url) => {
 
 const readPdfText = async (filePath) => {
   const buffer = await fs.readFile(filePath);
-  const parser = new PDFParse({ data: buffer });
+  return readPdfBuffer(buffer);
+};
 
-  try {
-    const parsed = await parser.getText();
-    return parsed.text || "";
-  } finally {
-    await parser.destroy();
-  }
+const readDocxBuffer = async (buffer) => {
+  const result = await mammoth.extractRawText({ buffer });
+  return result.value || "";
 };
 
 const readDocxText = async (filePath) => {
   const result = await mammoth.extractRawText({ path: filePath });
   return result.value || "";
+};
+
+const readImageBuffer = async (buffer) => {
+  const worker = await createWorker("eng");
+  try {
+    const result = await worker.recognize(buffer);
+    return result.data?.text || "";
+  } finally {
+    await worker.terminate();
+  }
 };
 
 const readImageText = async (filePath) => {
@@ -66,6 +70,26 @@ const readImageText = async (filePath) => {
   }
 };
 
+const readTextFromBufferByExtension = async (buffer, extension) => {
+  if (extension === ".txt" || extension === ".tex") {
+    return readTextBuffer(buffer);
+  }
+
+  if (extension === ".pdf") {
+    return readPdfBuffer(buffer);
+  }
+
+  if (extension === ".docx") {
+    return readDocxBuffer(buffer);
+  }
+
+  if (new Set([".png", ".jpg", ".jpeg", ".webp"]).has(extension)) {
+    return readImageBuffer(buffer);
+  }
+
+  return "";
+};
+
 export const extractResumeRawText = async (resume) => {
   const existing = resume.content?.trim();
   if (existing && existing !== "Uploaded resume") {
@@ -73,33 +97,31 @@ export const extractResumeRawText = async (resume) => {
   }
 
   const filePath = String(resume.filePath || "").trim();
-  const localFallbackPath = resume.storedFileName
-    ? path.join(process.cwd(), "uploads", "resumes", resume.storedFileName)
-    : "";
+  const firebaseLocation = resolveFirebaseResumeStorageLocation(resume);
+  const inferredExtension = path
+    .extname(String(resume.originalFileName || resume.storedFileName || firebaseLocation.storagePath || filePath))
+    .toLowerCase();
 
-  if (!filePath && !localFallbackPath) {
+  if (!firebaseLocation.storagePath && !filePath) {
     return "";
   }
 
-  if (isHttpUrl(filePath)) {
-    const remoteExtension = path.extname(new URL(filePath).pathname).toLowerCase();
-
+  if (firebaseLocation.storagePath) {
     try {
-      if (remoteExtension === ".pdf") {
-        return await readRemotePdfText(filePath);
-      }
+      const firebaseFile = await downloadResumeFromFirebaseStorage(firebaseLocation);
+      return await readTextFromBufferByExtension(firebaseFile.buffer, inferredExtension);
     } catch {
-      // Fall back to the local upload copy when the remote asset is private or unavailable.
+      return "";
     }
+  }
 
-    if (localFallbackPath) {
-      return extractResumeRawText({ ...resume, filePath: localFallbackPath });
-    }
-
+  if (/^https?:\/\//i.test(filePath)) {
     return "";
   }
 
-  const absoluteFilePath = path.join(process.cwd(), filePath.replace(/^\//, ""));
+  const absoluteFilePath = path.isAbsolute(filePath)
+    ? filePath
+    : path.join(process.cwd(), filePath.replace(/^\//, ""));
   const extension = path.extname(absoluteFilePath).toLowerCase();
 
   if (extension === ".txt" || extension === ".tex") {

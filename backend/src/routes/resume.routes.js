@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createResume, deleteResume, getResumeFile, listResumes } from "../contollers/resume.controller.js";
+import { createResume, deleteResume, getResumeFile, listResumes } from "../contollers/resume.firebase.controller.js";
 import { verifyFirebaseToken } from "../middlewares/auth.middleware.js";
 import { resumeUpload } from "../middlewares/multer.middleware.js";
 

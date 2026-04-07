@@ -1,9 +1,9 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { FileText, Eye, Trash2, Download, ChevronUp, Plus, Wand2, ArrowRight, ArrowLeft, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/use-auth";
-import { apiRequest, getBackendOrigin } from "@/lib/api";
+import { apiRequest } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -26,7 +26,7 @@ import jsPDF from "jspdf";
 // TYPES
 // ==========================================
 type ResumeItem = {
-  _id: string; title: string; format: "PDF" | "DOCX" | "TXT" | "TEX" | "IMAGE"; sections: number; content: string; originalFileName?: string; filePath?: string; createdAt: string; updatedAt: string;
+  _id: string; title: string; format: "PDF" | "DOCX" | "TXT" | "TEX" | "IMAGE"; sections: number; content: string; originalFileName?: string; filePath?: string; signedUrlExpiresAt?: string; createdAt: string; updatedAt: string;
 };
 type ProjectSeed = {
   _id: string;
@@ -44,9 +44,6 @@ type ProjectRow = { name: string; technologies: string; githubUrl: string; demoU
 type AchievementRow = { title: string; date: string; bulletText: string; };
 type LayoutMode = "COMPACT" | "EXHAUSTIVE";
 type OptimizedLayout = { layout: LayoutMode; maxProjectBullets: number; skillFormat: "INLINE" | "GRID"; fontScaling: number; lineHeight: number; sectionGap: number; };
-
-const resolveResumeFileUrl = (filePath: string) =>
-  /^https?:\/\//i.test(filePath) ? filePath : `${getBackendOrigin()}${filePath}`;
 type GeneratorTarget =
   | { kind: "experience"; index: number }
   | { kind: "achievement"; index: number }
@@ -153,9 +150,6 @@ const Resumes = () => {
   const [resumeTitle, setResumeTitle] = useState("");
   const [saveTitleMode, setSaveTitleMode] = useState<"jake" | null>(null);
   const [expandedResumeId, setExpandedResumeId] = useState<string | null>(null);
-  const [resumeBlobUrls, setResumeBlobUrls] = useState<Record<string, string>>({});
-  const [loadingResumeFileId, setLoadingResumeFileId] = useState<string | null>(null);
-  const resumeBlobUrlsRef = useRef<Record<string, string>>({});
 
   // Builder State
   const [showBuilder, setShowBuilder] = useState(false);
@@ -216,9 +210,6 @@ const Resumes = () => {
   }, [idToken]);
 
   useEffect(() => { void fetchResumes(); }, [fetchResumes]);
-  useEffect(() => () => {
-    Object.values(resumeBlobUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
-  }, []);
   useEffect(() => {
     if (!resumes.length) {
       return;
@@ -234,78 +225,6 @@ const Resumes = () => {
       }))
     });
   }, [resumes]);
-
-  const cacheResumeBlobUrl = useCallback((resumeId: string, nextUrl: string) => {
-    const previousUrl = resumeBlobUrlsRef.current[resumeId];
-
-    if (previousUrl && previousUrl !== nextUrl) {
-      URL.revokeObjectURL(previousUrl);
-    }
-
-    resumeBlobUrlsRef.current = {
-      ...resumeBlobUrlsRef.current,
-      [resumeId]: nextUrl
-    };
-    setResumeBlobUrls((current) => ({
-      ...current,
-      [resumeId]: nextUrl
-    }));
-  }, []);
-
-  const fetchResumeBlobUrl = useCallback(async (resume: ResumeItem) => {
-    if (!idToken || !resume.filePath) {
-      throw new Error("Resume file is not available");
-    }
-
-    const cachedUrl = resumeBlobUrlsRef.current[resume._id];
-    if (cachedUrl) {
-      return cachedUrl;
-    }
-
-    const targetUrl = resolveResumeFileUrl(resume.filePath);
-
-    resumeDebug("resumeFile:fetch:start", {
-      resumeId: resume._id,
-      title: resume.title,
-      originalPath: resume.filePath,
-      targetUrl
-    });
-
-    setLoadingResumeFileId(resume._id);
-
-    try {
-      const response = await fetch(targetUrl, {
-        headers: {
-          Authorization: `Bearer ${idToken}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to load resume file (${response.status})`);
-      }
-
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      cacheResumeBlobUrl(resume._id, blobUrl);
-
-      resumeDebug("resumeFile:fetch:success", {
-        resumeId: resume._id,
-        status: response.status,
-        contentType: response.headers.get("content-type"),
-        blobSize: blob.size
-      });
-
-      return blobUrl;
-    } catch (error) {
-      resumeDebug("resumeFile:fetch:error", {
-        resumeId: resume._id,
-        error: error instanceof Error ? error.message : String(error)
-      });
-      throw error;
-    } finally {
-      setLoadingResumeFileId((current) => (current === resume._id ? null : current));
-    }
-  }, [cacheResumeBlobUrl, idToken]);
 
   // Upload Handlers (removed)
 
@@ -686,46 +605,24 @@ const Resumes = () => {
     if (!nextId || !resume.filePath) {
       return;
     }
-
-    try {
-      await fetchResumeBlobUrl(resume);
-    } catch (error) {
-      setExpandedResumeId(null);
-      toast.error(error instanceof Error ? error.message : "Failed to load resume file");
-    }
   };
-  const handleOpenResumeExternal = async (resume: ResumeItem) => {
+  const handleOpenResumeExternal = (resume: ResumeItem) => {
     if (!resume.filePath) {
       return;
     }
 
-    try {
-      const blobUrl = await fetchResumeBlobUrl(resume);
-      resumeDebug("viewer:open-external", {
-        resumeId: resume._id,
-        title: resume.title,
-        originalPath: resume.filePath,
-        blobUrl
-      });
-      window.open(blobUrl, "_blank", "noopener,noreferrer");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to open resume");
-    }
+    resumeDebug("viewer:open-external", {
+      resumeId: resume._id,
+      title: resume.title,
+      signedUrl: resume.filePath,
+      signedUrlExpiresAt: resume.signedUrlExpiresAt
+    });
+    window.open(resume.filePath, "_blank", "noopener,noreferrer");
   };
   const handleDeleteResume = async (id: string) => {
     if (!idToken) return;
     try {
       await apiRequest<{ resumeId: string }>(`/resumes/${id}`, { method: "DELETE", token: idToken });
-      const cachedBlobUrl = resumeBlobUrlsRef.current[id];
-      if (cachedBlobUrl) {
-        URL.revokeObjectURL(cachedBlobUrl);
-        delete resumeBlobUrlsRef.current[id];
-        setResumeBlobUrls((current) => {
-          const next = { ...current };
-          delete next[id];
-          return next;
-        });
-      }
       setResumes((c) => c.filter((i) => i._id !== id));
       toast.success("Resume deleted");
     } 
@@ -988,31 +885,27 @@ const Resumes = () => {
                             </Button>
                           </div>
                           {r.format === "PDF" ? (
-                            resumeBlobUrls[r._id] ? (
-                              <iframe
-                                src={resumeBlobUrls[r._id]}
-                                title="preview"
-                                className="w-full h-[70vh] md:h-[600px] rounded-xl border border-border/50 bg-white shadow-inner"
-                                onLoad={() => {
-                                  resumeDebug("viewer:iframe-load", {
-                                    resumeId: r._id,
-                                    title: r.title,
-                                    src: resumeBlobUrls[r._id]
-                                  });
-                                }}
-                                onError={() => {
-                                  resumeDebug("viewer:iframe-error", {
-                                    resumeId: r._id,
-                                    title: r.title,
-                                    src: resumeBlobUrls[r._id]
-                                  });
-                                }}
-                              />
-                            ) : (
-                              <div className="flex flex-col items-center justify-center h-[70vh] md:h-[600px] rounded-xl border border-border/50 bg-white shadow-inner text-sm text-muted-foreground">
-                                {loadingResumeFileId === r._id ? "Loading PDF preview..." : "Preparing PDF preview..."}
-                              </div>
-                            )
+                            <iframe
+                              src={r.filePath}
+                              title="preview"
+                              className="w-full h-[70vh] md:h-[600px] rounded-xl border border-border/50 bg-white shadow-inner"
+                              onLoad={() => {
+                                resumeDebug("viewer:iframe-load", {
+                                  resumeId: r._id,
+                                  title: r.title,
+                                  src: r.filePath,
+                                  signedUrlExpiresAt: r.signedUrlExpiresAt
+                                });
+                              }}
+                              onError={() => {
+                                resumeDebug("viewer:iframe-error", {
+                                  resumeId: r._id,
+                                  title: r.title,
+                                  src: r.filePath,
+                                  signedUrlExpiresAt: r.signedUrlExpiresAt
+                                });
+                              }}
+                            />
                           ) : (
                             <div className="flex flex-col items-center justify-center p-12 bg-background/50 rounded-xl border border-border/50 text-center">
                               <FileText className="h-10 w-10 text-muted-foreground mb-3" />

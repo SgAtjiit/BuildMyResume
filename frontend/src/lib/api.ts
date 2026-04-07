@@ -3,6 +3,10 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
 export const getApiBaseUrl = () => (import.meta.env.VITE_API_URL || DEFAULT_API_BASE_URL).replace(/\/$/, "");
 
 export const getBackendOrigin = () => getApiBaseUrl().replace(/\/api\/v1$/i, "");
+const isBrowserDeployedAgainstLocalhostApi = () =>
+  typeof window !== "undefined" &&
+  window.location.hostname !== "localhost" &&
+  /^https?:\/\/localhost(?::\d+)?\/?/i.test(getApiBaseUrl());
 
 export type ApiEnvelope<T> = {
   statusCode: number;
@@ -22,6 +26,12 @@ export async function apiRequest<T>(
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
 
   try {
+    if (isBrowserDeployedAgainstLocalhostApi()) {
+      throw new Error(
+        `Frontend is still pointing to ${getApiBaseUrl()}. Set VITE_API_URL to your deployed backend URL before building the frontend.`
+      );
+    }
+
     const response = await fetch(`${getApiBaseUrl()}${path}`, {
       method: options.method ?? "GET",
       headers: {

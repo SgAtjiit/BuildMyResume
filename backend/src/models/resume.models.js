@@ -53,6 +53,21 @@ const resumeSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    storageProvider: {
+      type: String,
+      trim: true,
+      default: ""
+    },
+    firebaseStoragePath: {
+      type: String,
+      trim: true,
+      default: ""
+    },
+    firebaseStorageBucket: {
+      type: String,
+      trim: true,
+      default: ""
+    },
     cloudinaryPublicId: {
       type: String,
       trim: true,
