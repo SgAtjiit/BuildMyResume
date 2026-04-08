@@ -20,10 +20,12 @@ import { encryptToken } from "../utils/vercel-token-crypto.js";
 
 const updateProfileSchema = z.object({
   displayName: z.string().min(2).max(80).optional(),
+  headline: z.string().max(120).optional(),
   phone: z.string().max(30).optional(),
   about: z.string().max(2000).optional(),
   customDomain: z.string().max(120).optional(),
   notificationsEnabled: z.boolean().optional(),
+  onboardingCompleted: z.boolean().optional(),
   linkedInUrl: z.string().max(300).optional(),
   githubUrl: z.string().max(300).optional(),
   leetCodeId: z.string().max(120).optional(),
@@ -123,6 +125,10 @@ export const updateCurrentUser = asyncHandler(async (req, res) => {
     user.displayName = parsed.data.displayName;
   }
 
+  if (parsed.data.headline !== undefined) {
+    user.headline = parsed.data.headline;
+  }
+
   if (parsed.data.phone !== undefined) {
     user.phone = parsed.data.phone;
   }
@@ -137,6 +143,10 @@ export const updateCurrentUser = asyncHandler(async (req, res) => {
 
   if (parsed.data.notificationsEnabled !== undefined) {
     user.notificationsEnabled = parsed.data.notificationsEnabled;
+  }
+
+  if (parsed.data.onboardingCompleted !== undefined) {
+    user.onboardingCompletedAt = parsed.data.onboardingCompleted ? new Date() : null;
   }
 
   if (parsed.data.linkedInUrl !== undefined) {

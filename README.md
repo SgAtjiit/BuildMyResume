@@ -1,430 +1,762 @@
-# BuildMyResume
+# BuildMyResume: Full Approach, Tech Stack, Techniques, and Workflow
+
+## 1. Project Overview
+
+BuildMyResume is a full-stack career platform built around one core idea:
+
+**store profile data once, then reuse it everywhere.**
+
+Instead of treating resume building, JD tailoring, and portfolio publishing as separate tools, the application keeps one structured user profile and lets that profile power:
+
+- resume creation,
+- AI-assisted content generation,
+- job-description-based resume tailoring,
+- resume storage and retrieval,
+- portfolio website generation,
+- portfolio deployment,
+- and portfolio source export to GitHub.
+
+This makes the product closer to a personal career workspace than a basic resume editor.
+
+## 2. Product Approach From Start to End
+
+The implementation follows a profile-first architecture:
+
+1. Authenticate the user with Google through Firebase.
+2. Sync the authenticated user into MongoDB.
+3. Let the user build a structured master profile in Settings.
+4. Let the user add project entries manually or import them from README files.
+5. Reuse the same master data to build a clean one-page Jake resume.
+6. Reuse the same master data again to tailor a resume against a pasted job description using AI.
+7. Reuse the same profile and project data again to generate a live portfolio website.
+8. Optionally export the generated portfolio source code to GitHub.
+
+This approach reduces duplicate work and keeps data consistent across all surfaces.
+
+## 3. High-Level Architecture
+
+```mermaid
+flowchart LR
+  A["React + TypeScript Frontend"] --> B["Express API"]
+  B --> C["MongoDB via Mongoose"]
+  A --> D["Firebase Auth"]
+  B --> D
+  B --> E["Groq + LangChain"]
+  B --> F["Firebase Storage"]
+  B --> G["Cloudflare Pages"]
+  B --> H["GitHub REST API"]
+```
+
+## 4. Repository Structure
+
+```text
+BuildMyResume/
+  backend/
+    src/
+      app.js
+      index.js
+      config/
+      contollers/
+      middlewares/
+      models/
+      routes/
+      services/
+      utils/
+  frontend/
+    src/
+      App.tsx
+      components/
+      contexts/
+      lib/
+      pages/
+      config/
+      test/
+  README.md
+  docs/
+    BUILDMYRESUME_FULL_WORKFLOW.md
+```
+
+## 5. Frontend Stack
+
+### Core frontend technologies
+
+- React 18
+- TypeScript
+- Vite
+- React Router DOM
+- TanStack React Query
 
-<p align="left">
-   <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=000000" alt="React 18" />
-   <img src="https://img.shields.io/badge/TypeScript-0052CC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-   <img src="https://img.shields.io/badge/Express.js-000000?style=for-the-badge&logo=express&logoColor=white" alt="Express" />
-   <img src="https://img.shields.io/badge/MongoDB-47A248?style=for-the-badge&logo=mongodb&logoColor=white" alt="MongoDB" />
-   <img src="https://img.shields.io/badge/Firebase-FFCA28?style=for-the-badge&logo=firebase&logoColor=000000" alt="Firebase" />
-   <img src="https://img.shields.io/badge/LangChain-1C1C1C?style=for-the-badge" alt="LangChain" />
-   <img src="https://img.shields.io/badge/Groq-FF6B35?style=for-the-badge" alt="Groq" />
-</p>
+### UI and interaction
+
+- Tailwind CSS
+- Radix UI primitives
+- shadcn-style component structure
+- Framer Motion
+- Sonner
+- lucide-react
 
-BuildMyResume is a full-stack resume and portfolio platform that keeps one clean source of truth for your profile data, turns that data into polished resumes, tailors them to job descriptions with AI, and reuses the same content for portfolio workflows.
+### Forms, state, and utilities
 
-The project is designed around one practical goal: reduce repetitive resume editing and make every application faster, more targeted, and easier to maintain.
+- React local state with `useState`, `useMemo`, `useCallback`, `useEffect`
+- shared `apiRequest()` wrapper for backend communication
+- `zod` on the backend for request validation
 
-## Quick Tags
+### Resume rendering and export
 
-- AI-tailored resumes
-- Profile-first data model
-- Clean PDF export
-- JD match scoring
-- Portfolio reuse
-- One-click generation
-- One-click portfolio deployment
-- GitHub portfolio publishing
-- BuildMyResume branding
+- `jsPDF` for programmatic PDF creation
+- structured preview rendering through `JakeResumePreview`
 
-## What It Does
+### Frontend routing
 
-BuildMyResume gives you:
+The frontend route tree is defined in `frontend/src/App.tsx`:
 
-- A profile/settings area to store your core identity, contact details, education, skills, experience, achievements, and links.
-- A resume builder that can generate a clean, exportable resume from your stored profile data.
-- An AI Tailor flow that analyzes a job description, ranks your saved data against the JD, and produces a final tailored resume preview.
-- A portfolio system that can publish a deployed personal website from one click and also push the portfolio to GitHub.
-- Export and save flows for PDFs and resume artifacts.
+- `/` -> landing page
+- `/dashboard` -> authenticated dashboard shell
+- `/dashboard/resumes` -> resume builder and resume library
+- `/dashboard/projects` -> project CRUD
+- `/dashboard/tailor` -> AI tailor flow
+- `/dashboard/portfolios` -> portfolio generation and deployment
+- `/dashboard/settings` -> master profile editor
 
-## Why It Feels Useful
+## 6. Backend Stack
 
-The app is built to feel like a career workspace rather than a one-off resume editor.
+### Core backend technologies
 
-- Your data lives once, then flows into builder, tailor, preview, and portfolio screens.
-- AI is used for ranking, grounding, and shaping content, not for writing random prose.
-- The final result stays structured, readable, and easy to export.
+- Node.js
+- Express 5
+- MongoDB
+- Mongoose
 
-## Product Tags
+### Security and middleware
 
-<p align="left">
-   <img src="https://img.shields.io/badge/Resume-Builder-0EA5E9?style=flat-square" alt="Resume Builder" />
-   <img src="https://img.shields.io/badge/AI-Tailoring-F97316?style=flat-square" alt="AI Tailoring" />
-   <img src="https://img.shields.io/badge/JD-Matching-22C55E?style=flat-square" alt="JD Matching" />
-   <img src="https://img.shields.io/badge/Portfolio-Ready-8B5CF6?style=flat-square" alt="Portfolio Ready" />
-   <img src="https://img.shields.io/badge/PDF-Export-111827?style=flat-square" alt="PDF Export" />
-</p>
+- `helmet`
+- `cors`
+- `compression`
+- `cookie-parser`
+- `express-rate-limit`
+- `morgan`
 
-## Core Idea
+### File and content processing
 
-The app follows a simple principle:
+- `multer` for uploads
+- `mammoth` for DOCX extraction
+- `pdf-parse` for PDF text extraction
+- `tesseract.js` for OCR on image resumes
 
-**Store profile data once, reuse it everywhere.**
+### AI and orchestration
 
-Instead of manually rewriting your resume for every job, BuildMyResume keeps a structured master profile and uses that data to:
+- Groq SDK
+- LangChain
+- `@langchain/groq`
+- `@langchain/core`
 
-- build a base resume,
-- tailor the resume for a specific JD,
-- generate a preview,
-- save the final version,
-- and keep the same profile data available for portfolio generation.
+### External integrations
 
-That means the platform is not just a resume editor. It is a profile-driven career toolkit.
+- Firebase Authentication
+- Firebase Admin token verification
+- Firebase Storage for resume files
+- Cloudflare Pages for portfolio deployment
+- GitHub REST API for source export
 
-## Flagship Feature
+## 7. Main External Services Used
 
-The strongest part of BuildMyResume is the portfolio publish flow.
+### Firebase
 
-With one click, the app can take your saved data and turn it into a deployed portfolio website instead of just a static profile page. If you want the same portfolio represented in your code hosting workflow, it can also be pushed directly to GitHub.
+Used for:
 
-That makes the app useful in two directions at once:
+- Google sign-in on the frontend
+- ID token generation
+- backend token verification
+- resume file storage
+- signed resume download URLs
 
-- a live deployed portfolio website you can share immediately,
-- and a GitHub-backed source artifact you can keep versioned.
+### MongoDB
 
-## Tech Stack At a Glance
+Used for:
 
-<p align="left">
-   <img src="https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=node.js&logoColor=white" alt="Node.js" />
-   <img src="https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white" alt="Vite" />
-   <img src="https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS" />
-   <img src="https://img.shields.io/badge/Radix_UI-111827?style=flat-square" alt="Radix UI" />
-   <img src="https://img.shields.io/badge/MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB" />
-   <img src="https://img.shields.io/badge/Firebase-FFCA28?style=flat-square&logo=firebase&logoColor=000000" alt="Firebase" />
-   <img src="https://img.shields.io/badge/Cloudflare_Pages-F38020?style=flat-square&logo=cloudflare&logoColor=white" alt="Cloudflare Pages" />
-   
-</p>
+- user master profile storage
+- resume metadata storage
+- project storage
+- portfolio record storage
 
-| Area | Stack |
-| --- | --- |
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS, Radix UI, shadcn-style components |
-| State / Data | React Hook Form |
-| UI / Motion | Framer Motion, Sonner, lucide-react, Recharts, react-router-dom |
-| PDF / Preview | jsPDF, html2canvas |
-| Authentication | Firebase client auth, Firebase Admin |
-| Backend API | Express 5, Node.js, Mongoose, MongoDB |
-| AI / Orchestration | LangChain, Groq SDK, @langchain/groq, @langchain/core |
-| File / Resume Processing | multer, mammoth, pdf-parse, tesseract.js, jszip |
-| Security / Middleware | helmet, cors, compression, cookie-parser, express-rate-limit, morgan |
-| Deployment / Integrations | Cloudflare Pages, Groq API, MongoDB connection, Firebase services |
+### Groq
 
-## Why This Stack
+Used for:
 
-### Frontend: React + TypeScript + Vite
+- ATS-style bullet generation
+- profile summary generation
+- project bullet expansion
+- older resume tailoring generation path
 
-Why this choice:
+### LangChain
 
-- React gives component-based rendering for complex form flows and preview UIs.
-- TypeScript helps keep resume/profile data shapes consistent across builder, tailor, and preview screens.
-- Vite provides fast local development and production builds.
+Used for:
 
-Why not a heavier frontend framework:
+- structured JD analysis
+- structured optimization of skills and project selection
+- forcing predictable JSON outputs for AI workflows
 
-- The product is form-heavy and preview-heavy, not a server-rendered content site.
-- Vite + React keeps the bundle lean and the iteration speed high.
-- The app needs lots of reusable UI pieces, not a framework-specific opinionated architecture.
+### Cloudflare Pages
 
-### UI System: Tailwind CSS + shadcn/Radix
+Used for:
 
-Why this choice:
+- deploying generated portfolio build artifacts
+- returning a shareable `pages.dev` URL
+- attaching optional custom domains
 
-- Resume tooling is highly interactive, so accessible primitives matter.
-- Radix gives robust accessible components.
-- Tailwind makes it easy to control layout density, typography, and spacing in resume previews.
-- shadcn-style composition keeps the UI customizable without locking into a closed design system.
+### GitHub
 
-### Backend: Express + MongoDB + Mongoose
+Used for:
 
-Why this choice:
+- pushing generated portfolio source files into a repo
+- optionally creating the target repository
 
-- Express is simple and direct for API-heavy apps.
-- MongoDB fits profile data, project data, and nested resume structures naturally.
-- Mongoose provides schema validation and structured persistence for nested objects.
+## 8. Core Domain Models
 
-Why not a relational-only model:
+### User
 
-- Resume/profile data changes shape over time.
-- Nested sections like education, skills, experience, and achievements are easier to store and evolve in document form.
+The `User` model is the main source of truth. It stores:
 
-### Authentication: Firebase
+- Firebase identity
+- display name, email, phone, photo
+- about/summary
+- custom domain
+- LinkedIn, GitHub, LeetCode, GeeksForGeeks
+- education entries
+- skill buckets and skill sections
+- experience entries
+- achievement entries
+- optional Vercel connection info
 
-Why this choice:
+### Project
 
-- Firebase handles user authentication cleanly on the frontend.
-- The backend verifies Firebase ID tokens rather than managing passwords directly.
-- This reduces auth complexity while keeping the app secure.
+Each project stores:
 
-### AI Layer: Groq + LangChain
+- title
+- description
+- stack
+- date
+- GitHub URL
+- demo URL
+- source type: `manual` or `readme`
 
-Why this choice:
+### Resume
 
-- Groq gives fast LLM response time for tailored text generation.
-- LangChain is used for structured orchestration and guided output.
-- The app needs deterministic output shape more than open-ended chat.
+Each resume stores:
 
-Why structured orchestration matters:
+- owner
+- title
+- format
+- section count
+- extracted content text
+- uploaded file metadata
+- Firebase Storage path and bucket
 
-- Resume content must be predictable.
-- Free-form AI text is not enough for a resume builder.
-- The pipeline has to return specific fields like ranked skills, chosen projects, and final tailored JSON.
+### Portfolio
 
-### PDF Export: jsPDF
+Each portfolio record stores:
 
-Why this choice:
+- owning user
+- generated project name for Cloudflare Pages
+- live URL
+- serialized design preference
+- custom domain
+- published timestamp
 
-- The final resume is rendered client-side.
-- jsPDF avoids forcing a server-side PDF rendering dependency.
-- It gives direct control over line spacing, page breaks, fonts, and export behavior.
+## 9. Important Engineering Techniques
 
-### Deployment and Platform Services
+### 9.1 Profile-first data modeling
 
-Why these are part of the stack:
+The application does not make resume text the master source. Instead, it stores normalized structured data first and generates artifacts from that data later.
 
-- Cloudflare Pages is used for direct static deployment flows where the app publishes built assets.
+Benefits:
 
-- Firebase handles authentication and identity, so the app does not need to own password storage.
-- MongoDB keeps the profile and resume documents flexible enough to evolve with the product.
+- less duplication,
+- easier AI grounding,
+- easier editing,
+- cleaner portfolio generation,
+- and reusable project/skill/experience data.
 
-### Backend Utilities and Parsing Tools
+### 9.2 Data normalization through helper classes
 
-These libraries support the parts of the app that are easy to underestimate but important in practice:
+Backend classes in `backend/src/classes/profile.classes.js` normalize:
 
-- `multer` for file uploads.
-- `mammoth` for DOCX extraction.
-- `pdf-parse` for reading uploaded PDFs.
-- `tesseract.js` for OCR-style extraction when needed.
-- `jszip` and `form-data` for packaging and upload flows.
-- `helmet`, `cors`, `compression`, `morgan`, and `express-rate-limit` for hardening and observability.
-- `zod` for schema validation across structured payloads.
+- trimming,
+- deduplication,
+- stack parsing,
+- skill bucketing,
+- empty row filtering.
 
-## Product Architecture
+This keeps payloads clean before they reach MongoDB.
 
-BuildMyResume is built as a monorepo with two main applications:
+### 9.3 Schema validation with Zod
 
-- `backend/` - API, auth, persistence, AI orchestration, and profile management.
-- `frontend/` - user-facing dashboard, resume builder, AI tailor, preview, and export flow.
+Every important mutation path validates input before writing:
 
-### High-Level Flow
+- profile updates,
+- project creation,
+- resume creation,
+- AI endpoints,
+- GitHub export requests.
 
-1. User signs in with Firebase.
-2. Frontend obtains a Firebase ID token.
-3. Backend verifies the token and loads the stored user profile.
-4. User updates master profile data in Settings.
-5. Resume Builder uses that data to generate a normal resume.
-6. AI Tailor takes a job description and the same master data, then:
-   - analyzes the JD,
-   - ranks the user data against the JD,
-   - generates tailored JSON,
-   - produces a final preview,
-   - and saves the final resume.
-7. Portfolio-related services reuse the same profile/project data.
+This reduces invalid state and makes the API safer.
 
-## AI Tailoring Architecture
+### 9.4 Token-based auth instead of password management
 
-The AI tailoring flow is intentionally not a chat experience. It is an orchestration pipeline.
+The frontend signs in with Firebase, then sends a Firebase ID token to the backend. The backend verifies the token and uses the verified identity to scope all reads and writes.
 
-### Pipeline Steps
+This avoids building a custom password system and keeps access control simpler.
 
-#### 1. JD Analysis
+### 9.5 Structured AI instead of unbounded chat output
 
-The job description is parsed into structured requirements such as:
+AI is used as a transformation layer, not as a freeform chatbot.
 
-- primary tech stack
-- secondary skills
-- responsibilities
-- ATS keywords
-- role title
-- seniority
+Examples:
 
-#### 2. Master Data Matching
+- JD analysis returns structured requirement fields.
+- skill and project optimization returns structured JSON.
+- description generation returns exactly a requested number of lines.
+- project bullet expansion returns a single cleaned bullet.
 
-The user's stored profile data is scored against the JD.
+This is important for resume reliability.
 
-This includes:
+### 9.6 Grounded AI prompts
 
-- skills
-- projects
-- experience
-- achievements
+The prompts explicitly tell the model to:
 
-The system does not just pick the top 3 records blindly. It compares all candidate data and ranks it against the JD.
+- avoid fabricating metrics,
+- avoid inventing tools,
+- stay within provided context,
+- keep bullets resume-friendly,
+- preserve real project IDs and links.
 
-#### 3. JSON Transformation
+This improves trust and consistency.
 
-The selected content is then transformed into final tailored resume JSON.
+### 9.7 Client-side PDF generation
 
-This output powers the final preview and save flow.
+The resume PDF is generated on the frontend with `jsPDF`.
 
-### Why This Approach
+Why this approach works well here:
 
-Why not generate plain resume text directly:
+- the resume layout is highly controlled,
+- the app avoids a server-side PDF service,
+- the export stays fast for the user,
+- the frontend can preview and export from the same structured data.
 
-- Plain text is hard to validate and reuse.
-- JSON is easier to map into structured UI sections.
-- It is safer for preview, export, and future edits.
+### 9.8 Generated-source deployment for portfolios
 
-Why not let the model freely write the resume:
+The portfolio system does not just render HTML in memory. It:
 
-- Resume content needs hard limits and predictable structure.
-- Overly free-form output tends to hallucinate or over-explain.
-- Structured output keeps the final resume cleaner and more consistent.
+1. generates a small Vite/React project,
+2. writes it into a temp workspace,
+3. runs `npm install`,
+4. runs `npm run build`,
+5. reads the `dist` files,
+6. uploads those assets to Cloudflare Pages.
 
-### Tailoring Rules Used in the App
+This gives the user a real static site build, not only a mock preview.
 
-- Max 3 final projects in the tailored resume.
-- Project bullets are forced to be concrete and resume-like.
-- STAR is used internally, but labels are not shown.
-- Output is sanitized so it reads like a resume, not an AI explanation.
-- Suggested gap analysis is included to show what is missing and what to improve.
+## 10. End-to-End User Workflow
 
-## Features
+## 10.1 Authentication Workflow
 
-### Profile and Settings
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant F as Frontend
+  participant FB as Firebase Auth
+  participant B as Backend
+  participant DB as MongoDB
 
-- Store name, email, phone, LinkedIn, GitHub, education, skills, experience, and achievements.
-- Keep one master profile that powers all generated content.
-- Phone number is editable and reused everywhere it is required.
+  U->>F: Click sign in with Google
+  F->>FB: signInWithPopup()
+  FB-->>F: Firebase user + ID token
+  F->>B: GET /auth/me with Bearer token
+  B->>FB: Verify token
+  B->>DB: Upsert/load user
+  DB-->>B: User profile
+  B-->>F: Current user payload
+```
 
-### Resume Builder
+Implementation details:
 
-- Build a resume from structured profile data.
-- Seed data from stored profile fields.
-- Preview the final resume before saving.
-- Export as PDF.
+- Frontend auth state lives in `frontend/src/contexts/auth-context.tsx`.
+- Firebase client config lives in `frontend/src/lib/firebase.ts`.
+- Backend verification is handled by `verifyFirebaseToken`.
+- User sync is handled by `upsertUserFromFirebase`.
 
-### AI Tailor
+## 10.2 Settings / Master Profile Workflow
 
-- Paste a JD and generate a tailored resume.
-- Get JD match scoring and gap analysis.
-- See suggested skills and project improvements.
-- Auto-generate a final preview through the Jake resume pipeline.
-- Save the tailored result as a normal resume artifact.
+This is the most important workflow in the product because it builds the source data used everywhere else.
 
-### Portfolio and Projects
+The Settings page lets the user manage:
 
-- Store projects with descriptions, stacks, and links.
-- Reuse project data across builder, tailor, and portfolio flows.
-- Rank projects against a JD when tailoring.
-- Generate a deployed portfolio website in one click.
-- Publish the portfolio directly to GitHub when needed.
+- personal info,
+- profile summary,
+- custom domain,
+- social links,
+- education,
+- skill sections,
+- work experience,
+- achievements.
+
+Important techniques used:
+
+- state is hydrated from backend user data,
+- a baseline snapshot is kept to detect unsaved changes,
+- skill buckets can be derived from skill sections,
+- AI can generate summary text and bullet points,
+- data is normalized before save.
+
+Runtime flow:
+
+1. Frontend loads `/auth/me`.
+2. User edits structured fields.
+3. Optional AI helpers call:
+   - `/ai/profile-summary`
+   - `/ai/description-bullets`
+4. Frontend sends `PATCH /auth/me`.
+5. Backend validates, normalizes, and persists the profile.
+6. Updated profile becomes the new source of truth.
+
+## 10.3 Projects Workflow
+
+The Projects module adds reusable project entries that can later appear in resumes and portfolios.
+
+Supported creation paths:
+
+- manual project creation,
+- README import.
+
+### Manual path
+
+The user fills:
+
+- title,
+- description,
+- stack,
+- date,
+- GitHub URL,
+- demo URL.
+
+The backend validates the payload and writes a `Project` document.
+
+### README import path
+
+The user uploads a README file. The backend:
+
+1. reads the uploaded markdown,
+2. extracts the title,
+3. extracts the first useful description paragraph,
+4. tries to locate a tech stack section,
+5. extracts URLs,
+6. stores the result as a project with source `readme`.
+
+This is a smart onboarding shortcut for users who already have GitHub projects.
+
+## 10.4 Resume Builder Workflow
+
+The `Resumes` page serves two purposes:
+
+- it lists saved resumes,
+- and it provides the Jake resume builder flow.
+
+### Builder flow
+
+The builder steps are:
+
+1. basic contact
+2. professional summary when needed
+3. education
+4. experience
+5. achievements
+6. technical skills
+7. projects
+8. preview and save
+
+### Data strategy
+
+The builder seeds itself from:
+
+- backend user profile data,
+- saved projects.
+
+That means users do not have to rewrite everything from scratch each time.
+
+### AI support inside the builder
+
+The builder uses the reusable `AIDescriptionGeneratorDialog` to generate:
+
+- experience bullets,
+- achievement bullets,
+- project bullets.
+
+The prompts come from `frontend/src/config/aiPromptPresets.ts` and are designed to be ATS-oriented.
+
+### Preview strategy
+
+The preview is rendered through `JakeResumePreview`, which keeps:
+
+- standardized section ordering,
+- strong headings,
+- one-page style structure,
+- predictable typography,
+- structured bullet output.
+
+### Save strategy
+
+When the user saves:
+
+1. frontend converts the structured resume into a PDF blob using `jsPDF`,
+2. frontend sends `FormData` to `POST /resumes`,
+3. backend uploads the file to Firebase Storage,
+4. backend stores metadata in MongoDB,
+5. backend returns resume metadata and a signed read URL.
+
+### Resume retrieval workflow
+
+When listing resumes:
+
+1. backend fetches user resumes from MongoDB,
+2. backend resolves Firebase Storage locations,
+3. backend generates signed temporary URLs,
+4. frontend displays embedded preview when possible.
+
+## 10.5 Resume Extraction Workflow
+
+Resume extraction is important for AI tailoring and content recovery.
+
+The extraction service supports:
+
+- plain text files,
+- PDF files,
+- DOCX files,
+- images through OCR.
+
+The extraction order is:
+
+1. use existing stored `content` if it already exists,
+2. otherwise resolve the file from Firebase Storage,
+3. infer file type,
+4. parse the file using the correct parser,
+5. extract focused sections like skills, projects, achievements, and experience.
+
+This makes the tailor flow work even when the stored resume is a file rather than pure text.
+
+## 10.6 AI Tailor Workflow
+
+This is the most advanced logic in the product.
+
+The tailor module is not a simple “rewrite my resume” prompt. It is a multi-stage AI pipeline.
+
+### Full pipeline
+
+```mermaid
+flowchart TD
+  A["Paste Job Description"] --> B["Analyze JD into structured requirements"]
+  B --> C["Load user profile + optional saved resume"]
+  C --> D["Extract and normalize skills / projects / experience / achievements"]
+  D --> E["Rank master data against JD"]
+  E --> F["Use LangChain to optimize selected skills + projects"]
+  F --> G["Build final tailored resume JSON"]
+  G --> H["Show preview + match insights"]
+  H --> I["Export and save PDF"]
+```
+
+### Stage 1: JD analysis
+
+The backend extracts:
+
+- primary tech stack,
+- secondary skills,
+- core responsibilities,
+- ATS keywords,
+- role title,
+- seniority.
+
+This is done by LangChain with structured output validation.
+
+### Stage 2: master data matching
+
+The system then compares the job requirements against the user’s:
+
+- skills,
+- projects,
+- experience,
+- achievements.
+
+This is more grounded than asking an LLM to invent a whole resume from scratch.
+
+### Stage 3: optimization
+
+LangChain then transforms the selected data into:
+
+- ordered optimized skills,
+- selected projects with cleaned bullets,
+- summary notes.
+
+### Stage 4: insight generation
+
+The backend computes helpful feedback like:
+
+- current match percentage,
+- projected tailored match percentage,
+- missing skills,
+- project upgrade suggestions,
+- gap summary notes.
+
+### Stage 5: final preview and save
+
+The frontend converts the tailored JSON into the same resume preview model and lets the user save the final PDF to the resume library.
+
+## 10.7 Portfolio Publish Workflow
+
+The portfolio feature is another example of profile reuse.
+
+The user chooses:
+
+- theme,
+- font,
+- animation level,
+- accent color,
+- optional notes.
+
+### Publish pipeline
+
+```mermaid
+flowchart TD
+  A["Profile + Projects + Design Preference"] --> B["Generate portfolio source bundle"]
+  B --> C["Create temp Vite project"]
+  C --> D["npm install"]
+  D --> E["npm run build"]
+  E --> F["Read dist files"]
+  F --> G["Upload assets to Cloudflare Pages"]
+  G --> H["Return live pages.dev URL"]
+  H --> I["Optionally attach custom domain"]
+```
+
+### Internal backend steps
+
+1. Load user and projects.
+2. Create or reuse a `Portfolio` record.
+3. Convert user data into a profile payload.
+4. Generate CSS and component files for a Vite/React portfolio project.
+5. Build the generated project inside a temp workspace.
+6. Upload build artifacts to Cloudflare Pages.
+7. Persist the final URL and preferences.
+
+### Why this design is strong
+
+Because the output is a real generated codebase:
+
+- deployment is reproducible,
+- source export becomes easy,
+- the user can own the generated frontend,
+- design preferences can be reapplied consistently.
+
+## 10.8 GitHub Export Workflow
+
+After generating the portfolio source bundle, the user can export that generated source to GitHub.
+
+The user provides:
+
+- GitHub personal access token,
+- repo owner,
+- repo name,
+- branch,
+- optional subfolder path,
+- visibility.
+
+The backend then:
+
+1. validates the payload,
+2. generates the portfolio source bundle,
+3. checks if the repo exists,
+4. creates it if allowed,
+5. uploads each file through the GitHub Contents API,
+6. returns repo metadata and update counts.
+
+This gives the user code ownership in addition to the deployed portfolio URL.
+
+## 11. Current API Surface
+
+### Auth
+
+- `POST /api/v1/auth/firebase/sign-in`
+- `GET /api/v1/auth/me`
+- `PATCH /api/v1/auth/me`
+
+### AI
+
+- `POST /api/v1/ai/tailor`
+- `POST /api/v1/ai/project-bullet/extend`
+- `POST /api/v1/ai/profile-summary`
+- `POST /api/v1/ai/description-bullets`
+- `POST /api/v1/ai/analyze-jd`
+- `POST /api/v1/ai/match-master-data`
+- `POST /api/v1/ai/tailor-two-stage`
+
+### Resumes
+
+- `GET /api/v1/resumes`
+- `GET /api/v1/resumes/:resumeId/file`
+- `POST /api/v1/resumes`
+- `DELETE /api/v1/resumes/:resumeId`
 
 ### Dashboard
 
-- View profile and resume activity.
-- Navigate to resumes, projects, tailoring, portfolio, and settings.
+- `GET /api/v1/dashboard/summary`
+- `GET /api/v1/dashboard/profile`
 
-## Data Model
+### Projects
 
-The app centers around a user profile document that includes:
+- `GET /api/v1/projects`
+- `POST /api/v1/projects`
+- `PATCH /api/v1/projects/:projectId`
+- `DELETE /api/v1/projects/:projectId`
+- `POST /api/v1/projects/from-readme`
 
-- identity: name, email, photo, phone
-- social links: LinkedIn, GitHub
-- education entries
-- skills and grouped skill sections
-- experience entries
-- achievements
-- custom domain and notification settings
-- Vercel connection metadata
+### Portfolio
 
-This structure is important because the same data powers multiple product areas.
+- `POST /portfolio/publish`
+- `POST /portfolio/github`
 
-## Backend Responsibilities
+## 12. Setup and Environment Requirements
 
-The backend is responsible for:
+### Frontend environment
 
-- Firebase token verification
-- profile persistence
-- resume record storage
-- project storage and lookup
-- AI orchestration and tailoring
-- file upload handling
-- dashboard/profile snapshots
+The frontend expects Firebase client variables such as:
 
-### Why keep AI orchestration in the backend
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+- `VITE_FIREBASE_MEASUREMENT_ID`
+- `VITE_API_URL`
 
-- Keeps API keys and credentials hidden.
-- Centralizes prompt logic and output validation.
-- Makes frontend UI simpler.
-- Gives a single place to adjust the resume logic without changing the user interface.
+### Backend environment
 
-## Frontend Responsibilities
+The backend requires:
 
-The frontend is responsible for:
-
-- authentication flow
-- settings UI
-- resume builder UI
-- AI Tailor page
-- preview rendering
-- export/save actions
-- dashboard and project management screens
-
-### Why keep export client-side
-
-- Faster preview loops.
-- Less server load.
-- Direct control over typography and page layout.
-- Easier iteration on resume formatting.
-
-## Main User Flows
-
-### 1. First-Time Setup
-
-- Sign in with Google/Firebase.
-- Open Settings.
-- Add name, phone, links, education, skills, and experience.
-
-### 2. Normal Resume Creation
-
-- Open Resumes.
-- Use the builder to generate a resume from saved profile data.
-- Adjust content and save the final PDF.
-
-### 3. AI Tailored Resume
-
-- Paste a JD into AI Tailor.
-- The system analyzes the JD and ranks your data.
-- A final tailored JSON is generated.
-- Preview is rendered.
-- Save the final resume.
-
-### 4. Portfolio Content Reuse
-
-- Projects stored in profile data can be reused for portfolio generation and AI matching.
-
-## Repository Structure
-
-- `backend/` - Express API, MongoDB models, AI services, auth, and routes.
-- `frontend/` - React app with dashboard, builder, tailoring, and preview components.
-
-## Environment Overview
-
-### Backend
-
-Typical backend requirements include:
-
+- `PORT`
+- `API_PREFIX`
+- `CORS_ORIGIN`
+- `MONGODB_URI`
+- `FIREBASE_PROJECT_ID`
 - Firebase Admin credentials
-- MongoDB connection string
-- Groq API key
-- JWT/auth related environment values
-- Vercel integration values if portfolio deployment is used
+- `FIREBASE_API_KEY`
+- `FIREBASE_STORAGE_BUCKET`
+- `GROQ_API_KEY`
+- optional `CF_ACCOUNT_ID`
+- optional `CF_API_TOKEN`
 
-### Frontend
+### Why environment validation matters
 
-Typical frontend requirements include:
+The backend validates environment configuration at startup using `zod`, so configuration problems fail early instead of breaking at runtime later.
 
-- Firebase client config
-- API base URL
-- build-time Vite environment values
-
-## Local Development
-
-### Backend
-
-```bash
-cd backend
-npm install
-npm run dev
-```
+## 13. Local Development Workflow
 
 ### Frontend
 
@@ -434,67 +766,76 @@ npm install
 npm run dev
 ```
 
-## Build and Test
-
 ### Backend
 
 ```bash
 cd backend
-npm test
+npm install
+npm run dev
 ```
 
-### Frontend
+### Typical local dev flow
 
-```bash
-cd frontend
-npm run build
-```
+1. Start MongoDB and configure env vars.
+2. Start backend on port `8000` by default.
+3. Start frontend with Vite.
+4. Sign in through Firebase.
+5. Build out the profile in Settings.
+6. Add projects.
+7. Test resume generation, tailoring, and portfolio publish flows.
 
-## Design Decisions
+## 14. Testing and Quality Tooling
 
-### Why a single profile source of truth
+### Frontend tooling present
 
-Because duplicated data creates drift. If phone, links, skills, and project details live in multiple places, the resume and portfolio eventually diverge.
+- Vitest
+- Testing Library
+- jsdom
+- ESLint
+- Playwright dependency
 
-### Why the AI does ranking rather than full rewriting
+### Backend tooling present
 
-Because ranking is safer and more explainable. The model selects relevant content, then the app renders it in a stable resume structure.
+- Vitest
+- Supertest
 
-### Why the app keeps a structured preview before saving
+### Practical quality strategies already used in the code
 
-Because the user should see what will be exported before it becomes a PDF artifact.
+- input validation with `zod`
+- normalized domain classes
+- guarded error handling with `ApiError`
+- centralized async wrapper middleware
+- structured service separation
 
-### Why the final resume is saved as a standard resume file
+## 15. Architectural Strengths
 
-Because the generated output should behave like any other uploaded resume in the app, not as a special one-off AI artifact.
+The strongest parts of the current design are:
 
-## Status
+- one master profile reused across every feature,
+- clear separation of frontend, backend, service, and model concerns,
+- grounded AI instead of purely freeform generation,
+- deployable portfolio output rather than a fake preview,
+- support for both live deployment and GitHub ownership,
+- flexible MongoDB document modeling for nested resume data.
 
-The project currently emphasizes:
+## 16. Current Limitations and Improvement Opportunities
 
-- strong profile-driven resume generation
-- a controlled AI tailoring pipeline
-- reusable project and skill data
-- clean PDF preview and export
-- branding consistency under BuildMyResume
+Based on the current codebase, the main next-step improvements would be:
 
-## Roadmap Ideas
+- stronger automated tests around AI response shaping and portfolio generation,
+- richer resume analytics and ATS scoring visibility inside the UI,
+- better resume version comparison history,
+- more portfolio templates and layout systems,
+- broader content import options beyond README and resume files,
+- deeper usage of React Query for data fetching and cache invalidation.
 
-Possible next improvements:
+## 17. Final Summary
 
-- more explicit project recommendation explanations in the UI
-- stronger section-level scoring visualization
-- additional resume templates
-- richer portfolio publishing options
-- role-specific tailoring presets for DevOps, frontend, backend, and ML jobs
+BuildMyResume is built with a clear product and engineering strategy:
 
-## Summary
+- keep one structured source of truth,
+- use AI only where it adds controlled value,
+- turn that data into resumes, tailored variants, and portfolio sites,
+- and connect the workflow to real deployment and GitHub ownership.
 
-BuildMyResume is a profile-first, AI-assisted resume platform built to reduce manual rewriting and keep your job application materials consistent across resumes, portfolios, and tailored JD outputs.
-
-The main design choice is simple:
-
-- store everything once,
-- structure it well,
-- use AI only where it adds value,
-- and render the final output in a clean, predictable format.
+From a system-design perspective, the website is not just a CRUD dashboard. It is a profile-driven content pipeline powered by React, Express, MongoDB, Firebase, Groq, LangChain, Cloudflare Pages, and GitHub, with structured validation and reusable data models at every major stage.

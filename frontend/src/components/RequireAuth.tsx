@@ -1,10 +1,11 @@
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/use-auth";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 
 const RequireAuth = () => {
-  const { firebaseUser, loading } = useAuth();
+  const { firebaseUser, backendUser, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -31,6 +32,35 @@ const RequireAuth = () => {
 
   if (!firebaseUser) {
     return <Navigate to="/" replace />;
+  }
+
+  const isOnboardingRoute = location.pathname === "/onboarding";
+  const hasLikelyProfileData = Boolean(
+    backendUser &&
+      (
+        backendUser.about?.trim() ||
+        backendUser.phone?.trim() ||
+        backendUser.linkedInUrl?.trim() ||
+        backendUser.githubUrl?.trim() ||
+        backendUser.customDomain?.trim() ||
+        (backendUser.educationEntries?.length || 0) > 0 ||
+        (backendUser.skillSections?.some((section) => (section.skills || []).length > 0) || false) ||
+        (backendUser.experience?.length || 0) > 0 ||
+        (backendUser.achievements?.length || 0) > 0
+      )
+  );
+
+  const needsOnboarding =
+    Boolean(backendUser) &&
+    !backendUser?.onboardingCompletedAt &&
+    !hasLikelyProfileData;
+
+  if (needsOnboarding && !isOnboardingRoute) {
+    return <Navigate to="/onboarding" replace />;
+  }
+
+  if (!needsOnboarding && isOnboardingRoute) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <Outlet />;

@@ -19,6 +19,7 @@ import Projects from "./pages/Projects";
 import AiTailor from "./pages/AiTailor";
 import Portfolios from "./pages/Portfolios";
 import SettingsPage from "./pages/SettingsPage";
+import OnboardingFlow from "./pages/OnboardingFlow";
 import NotFound from "./pages/NotFound";
 import RequireAuth from "./components/RequireAuth";
 
@@ -48,6 +49,7 @@ const App = () => (
               <Route path="/" element={<Landing />} />
 
               <Route element={<RequireAuth />}>
+                <Route path="/onboarding" element={<OnboardingFlow />} />
                 <Route path="/dashboard" element={<DashboardLayout />}>
                   <Route index element={<DashboardHome />} />
                   <Route path="resumes" element={<Resumes />} />

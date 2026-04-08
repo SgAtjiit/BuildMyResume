@@ -18,6 +18,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true
     },
+    headline: {
+      type: String,
+      trim: true,
+      default: ""
+    },
     phone: {
       type: String,
       trim: true,
@@ -136,6 +141,10 @@ const userSchema = new mongoose.Schema(
     lastLoginAt: {
       type: Date,
       default: Date.now
+    },
+    onboardingCompletedAt: {
+      type: Date,
+      default: null
     }
   },
   {

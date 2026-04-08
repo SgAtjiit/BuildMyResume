@@ -2,23 +2,33 @@ import { User } from "../models/user.models.js";
 
 export const upsertUserFromFirebase = async (decodedToken) => {
   const firebaseUid = decodedToken.uid;
+  const nextEmail = decodedToken.email || null;
+  const nextName = decodedToken.name || null;
+  const nextPhoto = decodedToken.picture || null;
 
-  const user = await User.findOneAndUpdate(
-    { firebaseUid },
-    {
-      $set: {
-        email: decodedToken.email || null,
-        displayName: decodedToken.name || null,
-        photoURL: decodedToken.picture || null,
-        lastLoginAt: new Date()
-      }
-    },
-    {
-      upsert: true,
-      new: true,
-      setDefaultsOnInsert: true
-    }
-  );
+  let user = await User.findOne({ firebaseUid });
+
+  if (!user) {
+    user = await User.create({
+      firebaseUid,
+      email: nextEmail,
+      displayName: nextName,
+      photoURL: nextPhoto,
+      lastLoginAt: new Date()
+    });
+    return user;
+  }
+
+  // Preserve user-edited profile fields. We only hydrate missing basics from Firebase.
+  user.email = nextEmail || user.email || null;
+  if (!user.displayName && nextName) {
+    user.displayName = nextName;
+  }
+  if (!user.photoURL && nextPhoto) {
+    user.photoURL = nextPhoto;
+  }
+  user.lastLoginAt = new Date();
+  await user.save();
 
   return user;
 };

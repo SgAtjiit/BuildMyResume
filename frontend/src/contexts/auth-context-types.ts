@@ -3,6 +3,7 @@ export type BackendUser = {
   firebaseUid: string;
   email: string | null;
   displayName: string | null;
+  headline?: string;
   phone?: string;
   photoURL: string | null;
   about?: string;
@@ -49,5 +50,8 @@ export type BackendUser = {
     scope?: string;
     connectedAt?: string | null;
   };
+  onboardingCompletedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
   lastLoginAt: string;
 };
