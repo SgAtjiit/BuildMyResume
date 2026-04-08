@@ -446,6 +446,61 @@ const parseProjectEntriesFromText = (projectsText) => {
   return projects.slice(0, 6);
 };
 
+const parseAchievementEntriesFromText = (achievementsText) => {
+  const rawLines = String(achievementsText || "")
+    .split(/\r?\n/)
+    .map((line) => normalizeText(line))
+    .filter(Boolean);
+
+  const entries = [];
+  let current = null;
+
+  const commitCurrent2 = () => {
+    if (!current) {
+      return;
+    }
+    const title = normalizeText(current.title);
+    const bullets = uniqueStrings(current.bullets || []).slice(0, 6);
+    if (title || bullets.length) {
+      entries.push({
+        title: title || "Untitled Achievement",
+        date: normalizeText(current.date),
+        bullets
+      });
+    }
+  };
+
+  for (const line of rawLines) {
+    const isBullet = /^[-*•]\s+/.test(line);
+    const clean = toCleanLine(line);
+    if (!clean) {
+      continue;
+    }
+
+    if (headingHintRegex.test(clean)) {
+      continue;
+    }
+
+    if (isBullet) {
+      if (!current) {
+        current = { title: "", date: "", bullets: [] };
+      }
+      current.bullets.push(clean);
+      continue;
+    }
+
+    commitCurrent2();
+    current = {
+      title: clean.replace(/\s*[|]\s*$/, ""),
+      date: maybeExtractDate(clean),
+      bullets: []
+    };
+  }
+
+  commitCurrent2();
+  return entries.slice(0, 8);
+};
+
 const toSkillSections = (skills = []) => {
   const sections = {
     Languages: [],
@@ -1415,6 +1470,7 @@ export const parseResumeForOnboarding = asyncHandler(async (req, res) => {
 
   const skillSource = normalizeText(focusedSections.skillsText) ? focusedSections.skillsText : extractedText;
   const parsedSkillSections = parseSkillSectionsFromText(skillSource);
+  const parsedAchievements = parseAchievementEntriesFromText(focusedSections.achievementsText || "");
 
   return res.status(200).json(
     new ApiResponse(
@@ -1437,7 +1493,8 @@ export const parseResumeForOnboarding = asyncHandler(async (req, res) => {
           educationEntries: parsedEducationEntries,
           skillSections: parsedSkillSections,
           experience: parsedExperience,
-          projects: parsedProjects
+          projects: parsedProjects,
+          achievements: parsedAchievements
         },
         extractionMeta: {
           originalFileName: req.file.originalname || "",

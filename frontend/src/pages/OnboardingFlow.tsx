@@ -10,7 +10,8 @@ import {
   Loader2,
   Plus,
   Trash2,
-  Upload
+  Upload,
+  Award
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -68,6 +69,12 @@ type ProjectRow = {
   demoUrl: string;
 };
 
+type AchievementRow = {
+  title: string;
+  date: string;
+  bullets: string;
+};
+
 type ParsedOnboardingPayload = {
   profile?: Partial<ProfileState>;
   preferences?: {
@@ -84,6 +91,11 @@ type ParsedOnboardingPayload = {
     bullets?: string[];
   }[];
   projects?: ProjectRow[];
+  achievements?: {
+    title?: string;
+    date?: string;
+    bullets?: string[];
+  }[];
 };
 
 type BackendUser = NonNullable<ReturnType<typeof useAuth>["backendUser"]>;
@@ -111,6 +123,11 @@ const emptyProjectRow: ProjectRow = {
   date: "",
   githubUrl: "",
   demoUrl: ""
+};
+const emptyAchievementRow: AchievementRow = {
+  title: "",
+  date: "",
+  bullets: ""
 };
 
 const defaultSkillSections = (): SkillSectionRow[] => [
@@ -147,6 +164,9 @@ const isExperienceRowsEmpty = (rows: ExperienceRow[]) =>
   !rows.some((row) => row.role.trim() || row.company.trim() || row.location.trim() || row.date.trim() || parseLines(row.bullets).length > 0);
 
 const isProjectRowsEmpty = (rows: ProjectRow[]) => !rows.some((row) => hasAnyProjectContent(row));
+
+const isAchievementRowsEmpty = (rows: AchievementRow[]) =>
+  !rows.some((row) => row.title.trim() || row.date.trim() || parseLines(row.bullets).length > 0);
 
 const normalizeEducationRows = (items?: BackendUser["educationEntries"]): EducationRow[] => {
   const rows =
@@ -224,6 +244,7 @@ export default function OnboardingFlow() {
   const [skillSections, setSkillSections] = useState<SkillSectionRow[]>(defaultSkillSections());
   const [experienceRows, setExperienceRows] = useState<ExperienceRow[]>([{ ...emptyExperienceRow }]);
   const [projectRows, setProjectRows] = useState<ProjectRow[]>([{ ...emptyProjectRow }]);
+  const [achievementRows, setAchievementRows] = useState<AchievementRow[]>([{ ...emptyAchievementRow }]);
   const [initializedFromBackend, setInitializedFromBackend] = useState(false);
 
   useEffect(() => {
@@ -321,6 +342,15 @@ export default function OnboardingFlow() {
     setProjectRows((current) => {
       const next = current.filter((_, rowIndex) => rowIndex !== index);
       return next.length ? next : [{ ...emptyProjectRow }];
+    });
+
+  const updateAchievementRow = (index: number, patch: Partial<AchievementRow>) =>
+    setAchievementRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
+  const addAchievementRow = () => setAchievementRows((current) => [...current, { ...emptyAchievementRow }]);
+  const removeAchievementRow = (index: number) =>
+    setAchievementRows((current) => {
+      const next = current.filter((_, rowIndex) => rowIndex !== index);
+      return next.length ? next : [{ ...emptyAchievementRow }];
     });
 
   const validateCurrentStep = () => {
@@ -500,6 +530,19 @@ export default function OnboardingFlow() {
         setProjectRows((current) => (isProjectRowsEmpty(current) ? parsedProjects : current));
       }
 
+      const parsedAchievements = Array.isArray(parsed.achievements)
+        ? parsed.achievements
+            .map((item) => ({
+              title: String(item.title || "").trim(),
+              date: String(item.date || "").trim(),
+              bullets: Array.isArray(item.bullets) ? item.bullets.map((b) => String(b || "").trim()).filter(Boolean).join("\n") : ""
+            }))
+            .filter((item) => item.title || item.date || item.bullets)
+        : [];
+      if (parsedAchievements.length > 0) {
+        setAchievementRows((current) => (isAchievementRowsEmpty(current) ? parsedAchievements : current));
+      }
+
       toast.success("Resume parsed successfully. Please review and complete any missing fields.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to parse resume for onboarding.");
@@ -667,7 +710,14 @@ export default function OnboardingFlow() {
           skillFrameworks: hasAnyCategorized ? skillFrameworks : [],
           skillTools: hasAnyCategorized ? skillTools : [],
           skillLibraries: hasAnyCategorized ? skillLibraries : [],
-          experience: normalizedExperience
+          experience: normalizedExperience,
+          achievements: achievementRows
+            .map((item) => ({
+              title: item.title.trim(),
+              date: item.date.trim(),
+              bullets: parseLines(item.bullets)
+            }))
+            .filter((item) => item.title || item.bullets.length > 0)
         }
       });
 
@@ -760,6 +810,10 @@ export default function OnboardingFlow() {
               onUpdateProjectRow={updateProjectRow}
               onAddProjectRow={addProjectRow}
               onRemoveProjectRow={removeProjectRow}
+              achievementRows={achievementRows}
+              onUpdateAchievementRow={updateAchievementRow}
+              onAddAchievementRow={addAchievementRow}
+              onRemoveAchievementRow={removeAchievementRow}
               profile={profile}
               setProfile={setProfile}
               generatingSummary={generatingSummary}
@@ -1192,6 +1246,10 @@ function ProjectStep({
   onUpdateProjectRow,
   onAddProjectRow,
   onRemoveProjectRow,
+  achievementRows,
+  onUpdateAchievementRow,
+  onAddAchievementRow,
+  onRemoveAchievementRow,
   profile,
   setProfile,
   generatingSummary,
@@ -1201,6 +1259,10 @@ function ProjectStep({
   onUpdateProjectRow: (index: number, patch: Partial<ProjectRow>) => void;
   onAddProjectRow: () => void;
   onRemoveProjectRow: (index: number) => void;
+  achievementRows: AchievementRow[];
+  onUpdateAchievementRow: (index: number, patch: Partial<AchievementRow>) => void;
+  onAddAchievementRow: () => void;
+  onRemoveAchievementRow: (index: number) => void;
   profile: ProfileState;
   setProfile: React.Dispatch<React.SetStateAction<ProfileState>>;
   generatingSummary: boolean;
@@ -1280,6 +1342,58 @@ function ProjectStep({
               />
             </div>
           ))}
+        </div>
+
+        <div className="border-t border-border/30 pt-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Award className="h-4 w-4" />
+              Achievements (Optional)
+            </h3>
+            <Button type="button" variant="outline" size="sm" className="gap-2" onClick={onAddAchievementRow}>
+              <Plus className="h-3.5 w-3.5" />
+              Add Achievement
+            </Button>
+          </div>
+
+          <div className="space-y-3">
+            {achievementRows.map((row, index) => (
+              <div key={`achievement-${index}`} className="glass rounded-2xl border border-border/40 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-muted-foreground">Achievement {index + 1}</p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => onRemoveAchievementRow(index)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input
+                    placeholder="Achievement title"
+                    value={row.title}
+                    onChange={(event) => onUpdateAchievementRow(index, { title: event.target.value })}
+                  />
+                  <Input
+                    placeholder="Date (e.g. 2024)"
+                    value={row.date}
+                    onChange={(event) => onUpdateAchievementRow(index, { date: event.target.value })}
+                  />
+                </div>
+
+                <Textarea
+                  placeholder="Extra details — one per line (optional)"
+                  className="min-h-[80px] resize-none"
+                  value={row.bullets}
+                  onChange={(event) => onUpdateAchievementRow(index, { bullets: event.target.value })}
+                />
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="border-t border-border/30 pt-5 space-y-3">
