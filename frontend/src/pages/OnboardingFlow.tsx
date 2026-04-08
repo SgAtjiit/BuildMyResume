@@ -383,10 +383,23 @@ export default function OnboardingFlow() {
         toast.error("Please add at least one education entry.");
         return false;
       }
+      if (educationRows.length > 30) {
+        toast.error("Maximum 30 education entries allowed.");
+        return false;
+      }
 
       const hasSkill = skillSections.some((section) => section.skills.some((skill) => skill.trim()));
       if (!hasSkill) {
         toast.error("Please add at least one skill.");
+        return false;
+      }
+      if (skillSections.length > 30) {
+        toast.error("Maximum 30 skill categories allowed.");
+        return false;
+      }
+      const categoryWithTooManySkills = skillSections.find((section) => unique(section.skills).length > 100);
+      if (categoryWithTooManySkills) {
+        toast.error(`Maximum 100 skills allowed in "${categoryWithTooManySkills.title || "a category"}".`);
         return false;
       }
 
@@ -408,6 +421,30 @@ export default function OnboardingFlow() {
       );
       if (invalidProject) {
         toast.error(`Please provide a valid title and description for project ${invalidProject.index + 1}.`);
+        return false;
+      }
+      if (projectRows.length > 30) {
+        toast.error("Maximum 30 projects allowed.");
+        return false;
+      }
+
+      if (experienceRows.length > 30) {
+        toast.error("Maximum 30 experience entries allowed.");
+        return false;
+      }
+      const expWithTooManyBullets = experienceRows.find((row) => parseLines(row.bullets).length > 50);
+      if (expWithTooManyBullets) {
+        toast.error(`Maximum 50 bullet points allowed in experience: "${expWithTooManyBullets.role || expWithTooManyBullets.company || 'Entry'}".`);
+        return false;
+      }
+
+      if (achievementRows.length > 30) {
+        toast.error("Maximum 30 achievement entries allowed.");
+        return false;
+      }
+      const achWithTooManyBullets = achievementRows.find((row) => parseLines(row.bullets).length > 50);
+      if (achWithTooManyBullets) {
+        toast.error(`Maximum 50 bullet points allowed in achievement: "${achWithTooManyBullets.title || 'Entry'}".`);
         return false;
       }
 
