@@ -30,7 +30,7 @@ const updateProfileSchema = z.object({
   githubUrl: z.string().max(300).optional(),
   leetCodeId: z.string().max(120).optional(),
   geeksForGeeksId: z.string().max(120).optional(),
-  education: z.array(z.string().min(2).max(400)).max(10).optional(),
+  education: z.array(z.string().max(400)).max(10).optional(),
   educationEntries: z
     .array(
       z.object({
@@ -44,15 +44,15 @@ const updateProfileSchema = z.object({
     )
     .max(10)
     .optional(),
-  skillLanguages: z.array(z.string().min(1).max(80)).max(20).optional(),
-  skillFrameworks: z.array(z.string().min(1).max(80)).max(20).optional(),
-  skillTools: z.array(z.string().min(1).max(80)).max(20).optional(),
-  skillLibraries: z.array(z.string().min(1).max(80)).max(20).optional(),
+  skillLanguages: z.array(z.string().max(80)).max(20).optional(),
+  skillFrameworks: z.array(z.string().max(80)).max(20).optional(),
+  skillTools: z.array(z.string().max(80)).max(20).optional(),
+  skillLibraries: z.array(z.string().max(80)).max(20).optional(),
   skillSections: z
     .array(
       z.object({
         title: z.string().max(80).optional().default(""),
-        skills: z.array(z.string().min(1).max(80)).max(20)
+        skills: z.array(z.string().max(80)).max(20).optional().default([])
       })
     )
     .max(10)
@@ -64,7 +64,7 @@ const updateProfileSchema = z.object({
         company: z.string().max(120).optional().default(""),
         location: z.string().max(120).optional().default(""),
         date: z.string().max(60).optional().default(""),
-        bullets: z.array(z.string().min(1).max(400)).max(10)
+        bullets: z.array(z.string().max(400)).max(10).optional().default([])
       })
     )
     .max(10)
@@ -74,7 +74,7 @@ const updateProfileSchema = z.object({
       z.object({
         title: z.string().max(120).optional().default(""),
         date: z.string().max(60).optional().default(""),
-        bullets: z.array(z.string().min(1).max(400)).max(10)
+        bullets: z.array(z.string().max(400)).max(10).optional().default([])
       })
     )
     .max(10)
