@@ -52,6 +52,7 @@ export async function apiRequest<T>(
         ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
         ...(isFormData ? {} : { "Content-Type": "application/json" })
       },
+      cache: "no-store",
       body: options.body
         ? isFormData
           ? options.body
