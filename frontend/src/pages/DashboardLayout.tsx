@@ -1,13 +1,22 @@
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import DashboardSidebar from "@/components/DashboardSidebar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { FileText } from "lucide-react";
+import { FileText, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dashboardLinks } from "@/lib/dashboard-links";
+import { useAuth } from "@/contexts/use-auth";
+import { Button } from "@/components/ui/button";
 
 const DashboardLayout = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { signOutUser } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOutUser();
+    navigate("/");
+  };
 
   return (
     <div className="flex h-screen min-w-0 bg-background selection:bg-primary/20 selection:text-primary relative overflow-hidden">
@@ -25,7 +34,19 @@ const DashboardLayout = () => {
             </div>
             <span className="text-sm font-semibold tracking-tight text-foreground">BuildMyResume</span>
           </div>
-          <ThemeToggle className="h-9 w-9 border-border/60 bg-background/50" />
+          <div className="flex items-center gap-1.5">
+            <ThemeToggle className="h-9 w-9 border-border/60 bg-background/50" />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleSignOut}
+              className="h-9 w-9 border-border/60 bg-background/50 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              title="Sign out"
+            >
+              <LogOut className="h-[1.1rem] w-[1.1rem]" />
+              <span className="sr-only">Sign out</span>
+            </Button>
+          </div>
         </div>
         <nav className="px-3 pb-3 flex gap-2 overflow-x-auto no-scrollbar">
           {dashboardLinks.map((link) => {
