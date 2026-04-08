@@ -27,7 +27,7 @@ const fileFilter = (_req, file, callback) => {
 export const resumeUpload = multer({
   storage: multer.memoryStorage(),
   fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 }
+  limits: { fileSize: 25 * 1024 * 1024 }
 });
 
 const readmeFileFilter = (_req, file, callback) => {

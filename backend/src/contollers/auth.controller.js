@@ -30,7 +30,7 @@ const updateProfileSchema = z.object({
   githubUrl: z.string().max(300).optional(),
   leetCodeId: z.string().max(120).optional(),
   geeksForGeeksId: z.string().max(120).optional(),
-  education: z.array(z.string().min(2).max(200)).max(10).optional(),
+  education: z.array(z.string().min(2).max(400)).max(10).optional(),
   educationEntries: z
     .array(
       z.object({
@@ -39,7 +39,7 @@ const updateProfileSchema = z.object({
         college: z.string().max(160).optional().default(""),
         location: z.string().max(120).optional().default(""),
         endDate: z.string().max(60).optional().default(""),
-        grade: z.string().max(40).optional().default("")
+        grade: z.string().max(80).optional().default("")
       })
     )
     .max(10)
@@ -64,7 +64,7 @@ const updateProfileSchema = z.object({
         company: z.string().max(120).optional().default(""),
         location: z.string().max(120).optional().default(""),
         date: z.string().max(60).optional().default(""),
-        bullets: z.array(z.string().min(1).max(200)).max(10)
+        bullets: z.array(z.string().min(1).max(400)).max(10)
       })
     )
     .max(10)
@@ -74,7 +74,7 @@ const updateProfileSchema = z.object({
       z.object({
         title: z.string().max(120).optional().default(""),
         date: z.string().max(60).optional().default(""),
-        bullets: z.array(z.string().min(1).max(200)).max(10)
+        bullets: z.array(z.string().min(1).max(400)).max(10)
       })
     )
     .max(10)

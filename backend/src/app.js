@@ -69,6 +69,11 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use(cookieParser());
 
+// Cron keep-alive — no auth, no rate-limit (placed before apiLimiter)
+app.get(env.API_PREFIX, (_req, res) => {
+  res.status(200).json({ success: true, message: "Server is alive", timestamp: new Date().toISOString() });
+});
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,
@@ -77,6 +82,7 @@ const apiLimiter = rateLimit({
 });
 
 app.use(env.API_PREFIX, apiLimiter);
+
 app.use(`${env.API_PREFIX}/healthcheck`, healthcheckRouter);
 app.use(`${env.API_PREFIX}/auth`, authRouter);
 app.use(`${env.API_PREFIX}/ai`, aiRouter);

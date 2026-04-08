@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const { PDFParse } = require("pdf-parse");
 
 const urlRegex = /https?:\/\/[^\s)]+/gi;
-const headingRegex = /^(?:#+\s*)?(skills?|technical skills?|projects?|achievements?|experience|work experience|professional experience)\s*:?$/i;
+const headingRegex = /^(?:#+\s*)?(skills?|technical skills?|projects?|achievements?(?:\s*&\s*profiles?)?|profiles?|experience|work experience|professional experience|education|academic(?:\s+background)?|professional summary|summary)\s*:?$/i;
 
 const mask = {
   email: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
@@ -60,6 +60,46 @@ const readImageBuffer = async (buffer) => {
   }
 };
 
+const readPdfAnnotationUrlsBuffer = async (buffer) => {
+  try {
+    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+      isEvalSupported: false
+    });
+
+    const document = await loadingTask.promise;
+    const links = new Set();
+
+    for (let pageIndex = 1; pageIndex <= document.numPages; pageIndex += 1) {
+      const page = await document.getPage(pageIndex);
+      const annotations = await page.getAnnotations();
+
+      for (const annotation of annotations) {
+        const candidates = [
+          annotation?.url,
+          annotation?.unsafeUrl,
+          annotation?.action
+        ]
+          .map((item) => String(item || "").trim())
+          .filter(Boolean);
+
+        for (const candidate of candidates) {
+          if (/^(?:https?:\/\/|mailto:)/i.test(candidate)) {
+            links.add(candidate);
+          }
+        }
+      }
+    }
+
+    await loadingTask.destroy();
+    return Array.from(links);
+  } catch {
+    return [];
+  }
+};
+
 const readImageText = async (filePath) => {
   const worker = await createWorker("eng");
   try {
@@ -88,6 +128,64 @@ const readTextFromBufferByExtension = async (buffer, extension) => {
   }
 
   return "";
+};
+
+const inferExtensionFromUpload = ({ originalName = "", mimeType = "" }) => {
+  const fromName = path.extname(String(originalName || "")).toLowerCase();
+  if (fromName) {
+    return fromName;
+  }
+
+  const normalizedMime = String(mimeType || "").toLowerCase();
+  if (normalizedMime.includes("pdf")) return ".pdf";
+  if (normalizedMime.includes("wordprocessingml")) return ".docx";
+  if (normalizedMime.includes("msword")) return ".doc";
+  if (normalizedMime.includes("plain")) return ".txt";
+  if (normalizedMime.includes("x-tex")) return ".tex";
+  if (normalizedMime.includes("png")) return ".png";
+  if (normalizedMime.includes("jpeg") || normalizedMime.includes("jpg")) return ".jpg";
+  if (normalizedMime.includes("webp")) return ".webp";
+
+  return "";
+};
+
+export const extractRawTextFromUploadedResume = async (file) => {
+  if (!file?.buffer) {
+    return "";
+  }
+
+  const extension = inferExtensionFromUpload({
+    originalName: file.originalname,
+    mimeType: file.mimetype
+  });
+
+  if (extension === ".doc") {
+    return "";
+  }
+
+  return readTextFromBufferByExtension(file.buffer, extension);
+};
+
+export const extractResumeLinksFromUploadedResume = async (file, extractedText = "") => {
+  if (!file?.buffer) {
+    return [];
+  }
+
+  const extension = inferExtensionFromUpload({
+    originalName: file.originalname,
+    mimeType: file.mimetype
+  });
+
+  const linkSet = new Set(extractUrls(extractedText || ""));
+
+  if (extension === ".pdf") {
+    const annotationLinks = await readPdfAnnotationUrlsBuffer(file.buffer);
+    for (const link of annotationLinks) {
+      linkSet.add(link);
+    }
+  }
+
+  return Array.from(linkSet).map((item) => item.trim()).filter(Boolean);
 };
 
 export const extractResumeRawText = async (resume) => {
@@ -174,12 +272,15 @@ const normalizeSkill = (value) =>
     .replace(/`/g, "")
     .trim();
 
-export const extractFocusedResumeSections = (rawText) => {
+export const extractFocusedResumeSections = (rawText, options = {}) => {
+  const includeFallbackExperience = options.includeFallbackExperience !== false;
   const lines = rawText.split(/\r?\n/);
   const sections = {
+    summary: [],
     skills: [],
     projects: [],
     achievements: [],
+    education: [],
     experience: []
   };
 
@@ -200,6 +301,12 @@ export const extractFocusedResumeSections = (rawText) => {
         current = "projects";
       } else if (heading.includes("achievement")) {
         current = "achievements";
+      } else if (heading.includes("profile")) {
+        current = "achievements";
+      } else if (heading.includes("education") || heading.includes("academic")) {
+        current = "education";
+      } else if (heading.includes("summary")) {
+        current = "summary";
       } else {
         current = "experience";
       }
@@ -217,10 +324,12 @@ export const extractFocusedResumeSections = (rawText) => {
     .slice(0, 60);
 
   return {
+    summaryText: sections.summary.join("\n"),
     skillsText: sections.skills.join("\n"),
     projectsText: sections.projects.join("\n"),
     achievementsText: sections.achievements.join("\n"),
-    experienceText: (sections.experience.length ? sections.experience : fallbackExperience).join("\n")
+    educationText: sections.education.join("\n"),
+    experienceText: (sections.experience.length ? sections.experience : includeFallbackExperience ? fallbackExperience : []).join("\n")
   };
 };
 

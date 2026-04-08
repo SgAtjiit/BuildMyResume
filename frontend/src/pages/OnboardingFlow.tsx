@@ -9,7 +9,8 @@ import {
   CheckCircle2,
   Loader2,
   Plus,
-  Trash2
+  Trash2,
+  Upload
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -67,6 +68,24 @@ type ProjectRow = {
   demoUrl: string;
 };
 
+type ParsedOnboardingPayload = {
+  profile?: Partial<ProfileState>;
+  preferences?: {
+    linkedInUrl?: string;
+    githubUrl?: string;
+  };
+  educationEntries?: EducationRow[];
+  skillSections?: SkillSectionRow[];
+  experience?: {
+    role?: string;
+    company?: string;
+    location?: string;
+    date?: string;
+    bullets?: string[];
+  }[];
+  projects?: ProjectRow[];
+};
+
 type BackendUser = NonNullable<ReturnType<typeof useAuth>["backendUser"]>;
 
 const emptySkillRow = "";
@@ -117,6 +136,17 @@ const unique = (items: string[]) =>
 
 const hasAnyProjectContent = (row: ProjectRow) =>
   [row.title, row.description, row.stack, row.date, row.githubUrl, row.demoUrl].some((field) => field.trim());
+
+const isEducationRowsEmpty = (rows: EducationRow[]) =>
+  !rows.some((row) => [row.degree, row.specialization, row.college, row.location, row.endDate, row.grade].some((field) => field.trim()));
+
+const isSkillSectionsEmpty = (sections: SkillSectionRow[]) =>
+  !sections.some((section) => section.skills.some((skill) => skill.trim()));
+
+const isExperienceRowsEmpty = (rows: ExperienceRow[]) =>
+  !rows.some((row) => row.role.trim() || row.company.trim() || row.location.trim() || row.date.trim() || parseLines(row.bullets).length > 0);
+
+const isProjectRowsEmpty = (rows: ProjectRow[]) => !rows.some((row) => hasAnyProjectContent(row));
 
 const normalizeEducationRows = (items?: BackendUser["educationEntries"]): EducationRow[] => {
   const rows =
@@ -174,6 +204,7 @@ export default function OnboardingFlow() {
   const totalSteps = 3;
   const [submitting, setSubmitting] = useState(false);
   const [generatingSummary, setGeneratingSummary] = useState(false);
+  const [parsingResume, setParsingResume] = useState(false);
 
   const [profile, setProfile] = useState<ProfileState>({
     displayName: "",
@@ -329,13 +360,6 @@ export default function OnboardingFlow() {
         return false;
       }
 
-      const hasExperience = experienceRows.some(
-        (row) => row.role.trim() || row.company.trim() || parseLines(row.bullets).length > 0
-      );
-      if (!hasExperience) {
-        toast.error("Please add at least one experience entry.");
-        return false;
-      }
       return true;
     }
 
@@ -375,6 +399,114 @@ export default function OnboardingFlow() {
   };
 
   const handleBack = () => setStep((current) => Math.max(current - 1, 1));
+
+  const handleResumeUploadForAutofill = async (file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    if (!idToken) {
+      toast.error("Your session expired. Please sign in again.");
+      navigate("/");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("resumeFile", file);
+
+    try {
+      setParsingResume(true);
+
+      const response = await apiRequest<{ parsed: ParsedOnboardingPayload }>("/ai/onboarding/parse-resume", {
+        method: "POST",
+        token: idToken,
+        body: formData
+      });
+
+      const parsed = response.data.parsed || {};
+
+      setProfile((current) => ({
+        displayName: current.displayName.trim() || parsed.profile?.displayName?.trim() || current.displayName,
+        headline: current.headline.trim() || parsed.profile?.headline?.trim() || current.headline,
+        phone: current.phone.trim() || parsed.profile?.phone?.trim() || current.phone,
+        about: current.about.trim() || parsed.profile?.about?.trim() || current.about
+      }));
+
+      setPreferences((current) => ({
+        ...current,
+        linkedInUrl: current.linkedInUrl.trim() || parsed.preferences?.linkedInUrl?.trim() || current.linkedInUrl,
+        githubUrl: current.githubUrl.trim() || parsed.preferences?.githubUrl?.trim() || current.githubUrl
+      }));
+
+      const parsedEducation = Array.isArray(parsed.educationEntries)
+        ? parsed.educationEntries
+            .map((item) => ({
+              degree: String(item.degree || "").trim(),
+              specialization: String(item.specialization || "").trim(),
+              college: String(item.college || "").trim(),
+              location: String(item.location || "").trim(),
+              endDate: String(item.endDate || "").trim(),
+              grade: String(item.grade || "").trim()
+            }))
+            .filter((item) =>
+              [item.degree, item.specialization, item.college, item.location, item.endDate, item.grade].some(Boolean)
+            )
+        : [];
+      if (parsedEducation.length > 0) {
+        setEducationRows((current) => (isEducationRowsEmpty(current) ? parsedEducation : current));
+      }
+
+      const parsedSkills = Array.isArray(parsed.skillSections)
+        ? parsed.skillSections
+            .map((section, index) => ({
+              title: String(section.title || "").trim() || `Section ${index + 1}`,
+              skills: unique((section.skills || []).map((skill) => String(skill || "").trim()))
+            }))
+            .filter((section) => section.skills.length > 0)
+            .map((section) => ({ ...section, skills: section.skills.length ? section.skills : [emptySkillRow] }))
+        : [];
+      if (parsedSkills.length > 0) {
+        setSkillSections((current) => (isSkillSectionsEmpty(current) ? parsedSkills : current));
+      }
+
+      const parsedExperience = Array.isArray(parsed.experience)
+        ? parsed.experience
+            .map((item) => ({
+              role: String(item.role || "").trim(),
+              company: String(item.company || "").trim(),
+              location: String(item.location || "").trim(),
+              date: String(item.date || "").trim(),
+              bullets: Array.isArray(item.bullets) ? item.bullets.map((bullet) => String(bullet || "").trim()).filter(Boolean).join("\n") : ""
+            }))
+            .filter((item) => item.role || item.company || item.location || item.date || item.bullets)
+        : [];
+      if (parsedExperience.length > 0) {
+        setExperienceRows((current) => (isExperienceRowsEmpty(current) ? parsedExperience : current));
+      }
+
+      const parsedProjects = Array.isArray(parsed.projects)
+        ? parsed.projects
+            .map((project) => ({
+              title: String(project.title || "").trim(),
+              description: String(project.description || "").trim(),
+              stack: String(project.stack || "").trim(),
+              date: String(project.date || "").trim(),
+              githubUrl: String(project.githubUrl || "").trim(),
+              demoUrl: String(project.demoUrl || "").trim()
+            }))
+            .filter((project) => hasAnyProjectContent(project))
+        : [];
+      if (parsedProjects.length > 0) {
+        setProjectRows((current) => (isProjectRowsEmpty(current) ? parsedProjects : current));
+      }
+
+      toast.success("Resume parsed successfully. Please review and complete any missing fields.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to parse resume for onboarding.");
+    } finally {
+      setParsingResume(false);
+    }
+  };
 
   const handleGenerateSummary = async () => {
     if (!idToken) {
@@ -593,7 +725,14 @@ export default function OnboardingFlow() {
         </div>
 
         <div className="min-h-[280px]">
-          {step === 1 && <ProfileStep profile={profile} setProfile={setProfile} />}
+          {step === 1 && (
+            <ProfileStep
+              profile={profile}
+              setProfile={setProfile}
+              parsingResume={parsingResume}
+              onResumeFileSelect={handleResumeUploadForAutofill}
+            />
+          )}
           {step === 2 && (
             <PreferencesStep
               preferences={preferences}
@@ -634,7 +773,7 @@ export default function OnboardingFlow() {
             variant="ghost"
             onClick={handleBack}
             className={cn("gap-2", step === 1 && "invisible")}
-            disabled={submitting}
+            disabled={submitting || parsingResume}
           >
             <ChevronLeft className="h-4 w-4" /> Back
           </Button>
@@ -643,7 +782,7 @@ export default function OnboardingFlow() {
             <Button
               onClick={handleNext}
               className="gap-2 bg-primary text-primary-foreground active:scale-95 transition-all"
-              disabled={submitting || generatingSummary}
+              disabled={submitting || generatingSummary || parsingResume}
             >
               Continue <ChevronRight className="h-4 w-4" />
             </Button>
@@ -651,7 +790,7 @@ export default function OnboardingFlow() {
             <Button
               onClick={() => void handleComplete()}
               className="gap-2 bg-primary text-primary-foreground active:scale-95 transition-all"
-              disabled={submitting || generatingSummary}
+              disabled={submitting || generatingSummary || parsingResume}
             >
               {submitting ? (
                 <>
@@ -673,10 +812,14 @@ export default function OnboardingFlow() {
 
 function ProfileStep({
   profile,
-  setProfile
+  setProfile,
+  parsingResume,
+  onResumeFileSelect
 }: {
   profile: ProfileState;
   setProfile: React.Dispatch<React.SetStateAction<ProfileState>>;
+  parsingResume: boolean;
+  onResumeFileSelect: (file: File | null) => void;
 }) {
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
@@ -686,11 +829,55 @@ function ProfileStep({
         </div>
         <div>
           <h2 className="text-lg font-bold text-foreground">Profile Basics</h2>
-          <p className="text-sm text-muted-foreground">Add your core details for settings and resume generation.</p>
+          <p className="text-sm text-muted-foreground">Upload an existing resume for auto-fill, or enter details manually.</p>
         </div>
       </div>
 
       <div className="space-y-4">
+        <div className="glass rounded-2xl border border-border/40 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Have a resume already?</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Upload PDF/DOCX/TXT/image and we will auto-fill what we can.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              disabled={parsingResume}
+              onClick={() => {
+                const element = document.getElementById("onboarding-resume-upload") as HTMLInputElement | null;
+                element?.click();
+              }}
+            >
+              {parsingResume ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Parsing...
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4" />
+                  Upload Resume
+                </>
+              )}
+            </Button>
+            <input
+              id="onboarding-resume-upload"
+              type="file"
+              accept=".pdf,.docx,.txt,.tex,.png,.jpg,.jpeg,.webp"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0] || null;
+                onResumeFileSelect(file);
+                event.currentTarget.value = "";
+              }}
+            />
+          </div>
+        </div>
+
         <div className="space-y-2">
           <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground ml-1">Display Name</label>
           <Input
@@ -768,7 +955,9 @@ function PreferencesStep({
         </div>
         <div>
           <h2 className="text-lg font-bold text-foreground">Settings Essentials</h2>
-          <p className="text-sm text-muted-foreground">Links, education, skills, and experience yahin complete karein.</p>
+          <p className="text-sm text-muted-foreground">
+            Complete links, education, and skills here. Experience is optional.
+          </p>
         </div>
       </div>
 
@@ -937,7 +1126,7 @@ function PreferencesStep({
 
         <div className="border-t border-border/30 pt-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Experience</h3>
+            <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Experience (Optional)</h3>
             <Button type="button" variant="outline" size="sm" className="gap-2" onClick={onAddExperienceRow}>
               <Plus className="h-3.5 w-3.5" />
               Add Experience
