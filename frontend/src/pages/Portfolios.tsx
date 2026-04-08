@@ -212,7 +212,7 @@ const Portfolios = () => {
           <h1 className="text-3xl sm:text-4xl font-extrabold text-gradient mb-2 tracking-tight">Deploy Portfolio</h1>
           <p className="text-muted-foreground text-base sm:text-lg max-w-2xl">Get Deployed URL for your Personal Portfolio Website.</p>
         </div>
-        <Badge variant="secondary" className="self-start md:self-auto bg-primary/10 text-primary border-primary/20 px-3 py-1.5 text-xs font-medium">1-Click CI/CD</Badge>
+        <Badge variant="secondary" className="self-start md:self-auto bg-primary/10 text-primary border-primary/20 px-3 py-1.5 text-xs font-medium">1-Click away</Badge>
       </motion.div>
 
       {/* Info Banner */}
