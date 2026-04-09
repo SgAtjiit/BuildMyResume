@@ -2,6 +2,9 @@ import { mkdtemp, mkdir, readdir, readFile, realpath, rm, writeFile } from "node
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import pLimit from "p-limit";
+
+const buildLimit = pLimit(1);
 
 const getNpmCommand = () => (process.platform === "win32" ? "npm.cmd" : "npm");
 
@@ -80,49 +83,51 @@ const readDistFiles = async (distDir, baseDir = distDir) => {
 };
 
 export const buildViteProjectToDist = async ({ filesMap, traceId = "" }) => {
-  const tempBaseDir = await realpath(os.tmpdir());
-  const workspaceDir = await mkdtemp(path.join(tempBaseDir, "bmr-portfolio-"));
-  const npmCommand = getNpmCommand();
+  return buildLimit(async () => {
+    const tempBaseDir = await realpath(os.tmpdir());
+    const workspaceDir = await mkdtemp(path.join(tempBaseDir, "bmr-portfolio-"));
+    const npmCommand = getNpmCommand();
 
-  try {
-    console.info("[portfolio-build:start]", {
-      traceId,
-      workspaceDir,
-      fileCount: Object.keys(filesMap || {}).length
-    });
+    try {
+      console.info("[portfolio-build:start]", {
+        traceId,
+        workspaceDir,
+        fileCount: Object.keys(filesMap || {}).length
+      });
 
-    await writeProjectFiles(workspaceDir, filesMap);
+      await writeProjectFiles(workspaceDir, filesMap);
 
-    await runCommand({
-      command: npmCommand,
-      args: ["install", "--no-audit", "--no-fund", "--silent"],
-      cwd: workspaceDir,
-      traceId
-    });
+      await runCommand({
+        command: npmCommand,
+        args: ["install", "--no-audit", "--no-fund", "--silent"],
+        cwd: workspaceDir,
+        traceId
+      });
 
-    await runCommand({
-      command: npmCommand,
-      args: ["run", "build"],
-      cwd: workspaceDir,
-      traceId
-    });
+      await runCommand({
+        command: npmCommand,
+        args: ["run", "build"],
+        cwd: workspaceDir,
+        traceId
+      });
 
-    const distDir = path.join(workspaceDir, "dist");
-    const distFiles = await readDistFiles(distDir);
+      const distDir = path.join(workspaceDir, "dist");
+      const distFiles = await readDistFiles(distDir);
 
-    if (!distFiles.length) {
-      throw new Error("Vite build produced empty dist output");
+      if (!distFiles.length) {
+        throw new Error("Vite build produced empty dist output");
+      }
+
+      console.info("[portfolio-build:success]", {
+        traceId,
+        distFileCount: distFiles.length
+      });
+
+      return {
+        distFiles
+      };
+    } finally {
+      await rm(workspaceDir, { recursive: true, force: true });
     }
-
-    console.info("[portfolio-build:success]", {
-      traceId,
-      distFileCount: distFiles.length
-    });
-
-    return {
-      distFiles
-    };
-  } finally {
-    await rm(workspaceDir, { recursive: true, force: true });
-  }
+  });
 };

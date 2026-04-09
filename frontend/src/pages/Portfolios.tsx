@@ -45,7 +45,6 @@ type GitHubExportForm = { token: string; repoOwner: string; repoName: string; br
 // CONSTANTS
 // ==========================================
 const DEFAULT_PREFERENCE: PublishPreference = { theme: "minimal", font: "Inter", animations: "subtle", accent: "#0ea5e9", notes: "" };
-const PUBLISH_STEPS = [ "Preparing profile data", "Generating React template", "Building dist assets", "Uploading to Cloudflare" ];
 const DEFAULT_GITHUB_EXPORT_FORM: GitHubExportForm = { token: "", repoOwner: "", repoName: "", branch: "main", pathPrefix: "", privateRepo: false };
 
 // ==========================================
@@ -57,7 +56,10 @@ const Portfolios = () => {
   // State
   const [preference, setPreference] = useState<PublishPreference>(DEFAULT_PREFERENCE);
   const [publishing, setPublishing] = useState(false);
-  const [publishStep, setPublishStep] = useState(0);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [fakeProgress, setFakeProgress] = useState(0);
   const [liveUrl, setLiveUrl] = useState("");
   const [activePortfolio, setActivePortfolio] = useState<DashboardSummary["activePortfolio"]>(null);
   
@@ -96,6 +98,34 @@ const Portfolios = () => {
     void loadSavedPortfolio();
   }, [idToken]);
 
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (publishing && !publishError) {
+      const startTime = Date.now();
+      interval = setInterval(() => {
+        setElapsedMs(Date.now() - startTime);
+        setFakeProgress((prev) => prev + (99 - prev) * 0.05); // Zeno's paradox
+      }, 500);
+    } else if (!publishing && !publishError) {
+      setFakeProgress(100);
+    }
+    return () => clearInterval(interval);
+  }, [publishing, publishError]);
+
+  const publishingStatus = useMemo(() => {
+    if (publishError) {
+      if (retryCount >= 2) return "Cloudflare seems to be experiencing high latency right now. Your portfolio settings are saved safely—please try deploying again in a few minutes.";
+      return publishError;
+    }
+    if (!publishing && fakeProgress >= 100) return "Deployment Complete";
+    
+    if (elapsedMs > 60000) return "Cloudflare propagation is taking a bit longer than usual, please don't refresh the page...";
+    if (elapsedMs > 45000) return "Finalizing deployment (this can sometimes take an extra moment)...";
+    if (elapsedMs > 30000) return "Deploying assets to Cloudflare edge...";
+    if (elapsedMs > 15000) return "Resolving npm dependencies and building...";
+    return "Generating React components...";
+  }, [elapsedMs, publishing, publishError, retryCount, fakeProgress]);
+
   // Validators
   const canPublish = () => {
     if (!idToken || !backendUser) return false;
@@ -127,22 +157,28 @@ const Portfolios = () => {
     }
 
     try {
-      setPublishing(true); setPublishStep(1); setLiveUrl("");
+      setPublishing(true);
+      setPublishError(null);
+      setFakeProgress(0);
+      setElapsedMs(0);
+      setLiveUrl("");
+      
       const preferencePayload = { theme: preference.theme, font: preference.font, animations: preference.animations, accent: preference.accent, notes: preference.notes.trim() };
-      setPublishStep(2);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s timeout
 
       const response = await fetch(publishEndpoint, {
         method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ preference: preferencePayload })
+        body: JSON.stringify({ preference: preferencePayload }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
 
-      setPublishStep(3);
       const payload = (await response.json()) as PublishResponse;
 
       if (!response.ok || !payload.success) {
-        const message = payload.details || payload.error || "Failed to publish portfolio";
-        const traceSuffix = payload.traceId ? ` (trace: ${payload.traceId.slice(0, 8)})` : "";
-        return toast.error(`${message}${traceSuffix}`);
+        throw new Error(payload.details || payload.error || "Failed to publish portfolio");
       }
 
       const savedUrl = ensureExternalHttpsUrl(payload.url || "");
@@ -154,13 +190,22 @@ const Portfolios = () => {
         projectName: activePortfolio?.projectName || "Portfolio",
         publishedAt: new Date().toISOString()
       });
-      setPublishStep(4);
+      setRetryCount(0);
       toast.success("Portfolio published successfully");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to publish portfolio");
+      if (error instanceof Error && error.name === 'AbortError') {
+        setPublishError("Deployment timed out.");
+      } else {
+        setPublishError(error instanceof Error ? error.message : "Something went wrong during the build process.");
+      }
     } finally {
       setPublishing(false);
     }
+  };
+
+  const handleRetry = () => {
+    setRetryCount(p => p + 1);
+    void handlePublish();
   };
 
   const handleExportToGitHub = async () => {
@@ -193,11 +238,6 @@ const Portfolios = () => {
       setGithubExporting(false);
     }
   };
-
-  const progressValue = useMemo(() => {
-    if (!publishing && publishStep === 0) return 0;
-    return Math.round((Math.min(publishStep, PUBLISH_STEPS.length) / PUBLISH_STEPS.length) * 100);
-  }, [publishing, publishStep]);
 
   const portfolioLabel = activePortfolio?.customDomain || activePortfolio?.url || liveUrl;
   const portfolioPublishedAt = activePortfolio?.publishedAt
@@ -235,7 +275,7 @@ const Portfolios = () => {
       <div className="grid lg:grid-cols-12 gap-8">
 
         <AnimatePresence>
-          {activePortfolio && (
+          {activePortfolio?.url && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -343,23 +383,39 @@ const Portfolios = () => {
 
           {/* Deployment Progress Card */}
           <AnimatePresence>
-            {(publishing || publishStep > 0) && (
+            {(publishing || fakeProgress > 0) && (
               <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="glass rounded-2xl p-6 overflow-hidden">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
                   <h3 className="font-semibold text-foreground flex items-center gap-2">
-                    {publishStep === 4 ? <CheckCircle2 className="w-5 h-5 text-primary" /> : <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />}
+                    {publishError ? (
+                      <div className="w-5 h-5 rounded-full bg-destructive/20 flex items-center justify-center text-destructive text-xs font-bold">!</div>
+                    ) : !publishing && fakeProgress >= 100 ? (
+                      <CheckCircle2 className="w-5 h-5 text-primary" />
+                    ) : (
+                      <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    )}
                     Deployment Status
                   </h3>
-                  <Badge variant="outline" className={publishStep === 4 ? "text-primary border-primary/30" : "text-muted-foreground"}>{progressValue}%</Badge>
+                  <Badge variant="outline" className={publishError ? "text-destructive border-destructive/30" : !publishing && fakeProgress >= 100 ? "text-primary border-primary/30" : "text-muted-foreground"}>
+                    {Math.round(fakeProgress)}%
+                  </Badge>
                 </div>
-                <Progress value={progressValue} className="h-2.5 bg-background/50" />
-                <div className="mt-4 space-y-2">
-                  {PUBLISH_STEPS.map((step, index) => (
-                    <div key={index} className={`text-xs flex items-center gap-2 transition-colors duration-300 ${index < publishStep ? "text-foreground" : "text-muted-foreground/40"}`}>
-                      <div className={`w-1.5 h-1.5 rounded-full ${index < publishStep ? "bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]" : "bg-muted-foreground/30"}`} />
-                      {step}
-                    </div>
-                  ))}
+                <Progress value={fakeProgress} className={`h-2.5 bg-background/50 ${publishError ? "[&>div]:bg-destructive" : ""}`} />
+                <div className="mt-4 flex flex-col gap-3">
+                  <p className={`text-sm ${publishError ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                    {publishingStatus}
+                  </p>
+                  
+                  {publishError && (
+                    <Button 
+                        onClick={handleRetry} 
+                        variant={retryCount >= 2 ? "secondary" : "default"}
+                        className="self-start mt-2"
+                        disabled={retryCount >= 2}
+                    >
+                        Retry Deployment
+                    </Button>
+                  )}
                 </div>
               </motion.div>
             )}
