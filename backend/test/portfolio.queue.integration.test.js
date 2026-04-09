@@ -44,7 +44,7 @@ describe("Portfolio publish queue integration", () => {
       })
     );
 
-    const { default: portfolioRouter } = await import("../src/routes/portfolio.js");
+    const { default: portfolioRouter } = await import("../src/routes/portfolio.routes.js");
     const app = express();
     app.use(express.json());
     app.use("/portfolio", portfolioRouter);

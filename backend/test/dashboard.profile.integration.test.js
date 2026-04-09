@@ -46,12 +46,7 @@ describe("Dashboard profile snapshot integration", () => {
       experience: [{ role: "Developer", company: "XYZ" }],
       achievements: [{ title: "Hackathon Winner" }],
       customDomain: "pankaj.dev",
-      notificationsEnabled: true,
-      vercelConnection: {
-        connectedAt: new Date("2026-01-04T10:00:00.000Z"),
-        teamId: "team_123",
-        scope: "project:write"
-      }
+      notificationsEnabled: true
     };
 
     findUserByFirebaseUid.mockResolvedValue(user);
@@ -79,7 +74,6 @@ describe("Dashboard profile snapshot integration", () => {
     expect(response.body.data.profile.resumes).toBeUndefined();
     expect(response.body.data.profile.tailoredResumes).toBeUndefined();
     expect(response.body.data.profile.portfolio).toBeUndefined();
-    expect(response.body.data.profile.settings.vercelConnection).toBeUndefined();
     expect(response.body.data.profile.counts.projects).toBe(1);
     expect(response.body.data.profile.counts.experience).toBe(1);
     expect(response.body.data.profile.counts.achievements).toBe(1);

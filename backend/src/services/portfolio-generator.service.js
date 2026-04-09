@@ -270,7 +270,7 @@ export class GeneratorService {
     const payloadSize = estimatePayloadSize(files);
 
     if (payloadSize > MAX_TOTAL_PAYLOAD_BYTES) {
-      throw new ApiError(413, "Generated portfolio payload exceeds Vercel 15MB deployment limit");
+      throw new ApiError(413, "Generated portfolio payload exceeds the supported deployment size limit");
     }
 
     return {

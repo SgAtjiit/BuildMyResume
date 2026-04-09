@@ -42,14 +42,6 @@ export type BackendUser = {
     date?: string;
     bullets: string[];
   }[];
-  vercelConnection?: {
-    encryptedAccessToken?: string;
-    tokenIv?: string;
-    tokenAuthTag?: string;
-    teamId?: string;
-    scope?: string;
-    connectedAt?: string | null;
-  };
   onboardingCompletedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;

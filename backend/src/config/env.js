@@ -21,16 +21,6 @@ const envSchema = z.object({
 
   GROQ_API_KEY: z.string().min(1, "GROQ_API_KEY is required"),
   GROQ_MODEL: z.string().default("llama-3.3-70b-versatile"),
-  // LATEX_BIN_DIR: z.string().optional().default(""),
-
-  // VERCEL_OAUTH_CLIENT_ID: z.string().optional().default(""),
-  // VERCEL_OAUTH_CLIENT_SECRET: z.string().optional().default(""),
-  // VERCEL_OAUTH_REDIRECT_URI: z.string().optional().default(""),
-  // VERCEL_OAUTH_SCOPE: z.string().default("project:write deployment:write"),
-  // VERCEL_OAUTH_STATE_SECRET: z.string().optional().default(""),
-  // VERCEL_PLATFORM_TOKEN: z.string().optional().default(""),
-  // VERCEL_API_BASE_URL: z.string().default("https://api.vercel.com"),
-  // TOKEN_ENCRYPTION_KEY: z.string().min(32, "TOKEN_ENCRYPTION_KEY (>=32 chars) is required"),
 
   CF_ACCOUNT_ID: z.string().optional().default(""),
   CF_API_TOKEN: z.string().optional().default("")

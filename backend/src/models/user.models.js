@@ -130,14 +130,6 @@ const userSchema = new mongoose.Schema(
       ],
       default: []
     },
-    vercelConnection: {
-      encryptedAccessToken: { type: String, default: "" },
-      tokenIv: { type: String, default: "" },
-      tokenAuthTag: { type: String, default: "" },
-      teamId: { type: String, default: "" },
-      scope: { type: String, default: "" },
-      connectedAt: { type: Date, default: null }
-    },
     lastLoginAt: {
       type: Date,
       default: Date.now

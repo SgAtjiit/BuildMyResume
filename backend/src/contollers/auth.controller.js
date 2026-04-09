@@ -13,10 +13,6 @@ import {
   normalizeTextArray,
   SkillSection
 } from "../classes/profile.classes.js";
-import { env } from "../config/env.js";
-import { createOAuthState, verifyOAuthState } from "../utils/vercel-oauth-state.js";
-import { VercelService } from "../services/vercel.service.js";
-import { encryptToken } from "../utils/vercel-token-crypto.js";
 
 const updateProfileSchema = z.object({
   displayName: z.string().min(2).max(80).optional(),
@@ -218,85 +214,4 @@ export const updateCurrentUser = asyncHandler(async (req, res) => {
   await user.save();
 
   return res.status(200).json(new ApiResponse(200, { user }, "Profile updated successfully"));
-});
-
-export const startVercelOAuth = asyncHandler(async (req, res) => {
-  if (!env.VERCEL_OAUTH_CLIENT_ID || !env.VERCEL_OAUTH_REDIRECT_URI) {
-    throw new ApiError(500, "Vercel OAuth is not configured");
-  }
-
-  const state = createOAuthState({
-    uid: req.auth.uid,
-    ts: Date.now(),
-    redirectTo: typeof req.query.redirectTo === "string" ? req.query.redirectTo : ""
-  });
-
-  const oauthUrl = new URL("https://vercel.com/oauth/authorize");
-  oauthUrl.searchParams.set("client_id", env.VERCEL_OAUTH_CLIENT_ID);
-  oauthUrl.searchParams.set("redirect_uri", env.VERCEL_OAUTH_REDIRECT_URI);
-  oauthUrl.searchParams.set("scope", env.VERCEL_OAUTH_SCOPE);
-  oauthUrl.searchParams.set("state", state);
-
-  return res.status(200).json(
-    new ApiResponse(
-      200,
-      {
-        authorizationUrl: oauthUrl.toString()
-      },
-      "Vercel OAuth URL generated"
-    )
-  );
-});
-
-export const handleVercelOAuthCallback = asyncHandler(async (req, res) => {
-  const { code, state, teamId } = req.query;
-
-  if (!code || typeof code !== "string") {
-    throw new ApiError(400, "Missing OAuth code");
-  }
-
-  if (!state || typeof state !== "string") {
-    throw new ApiError(400, "Missing OAuth state");
-  }
-
-  const parsedState = verifyOAuthState(state);
-  const maxStateAgeMs = 10 * 60 * 1000;
-
-  if (!parsedState?.uid || !parsedState?.ts || Date.now() - parsedState.ts > maxStateAgeMs) {
-    throw new ApiError(400, "OAuth state is invalid or expired");
-  }
-
-  const tokenPayload = await VercelService.exchangeOAuthCode({ code });
-  const user = await findUserByFirebaseUid(parsedState.uid);
-  const encrypted = encryptToken(tokenPayload.access_token || "");
-
-  user.vercelConnection = {
-    ...encrypted,
-    teamId: typeof teamId === "string" ? teamId : tokenPayload.team_id || "",
-    scope: tokenPayload.scope || env.VERCEL_OAUTH_SCOPE,
-    connectedAt: new Date()
-  };
-
-  await user.save();
-
-  if (parsedState.redirectTo) {
-    const redirectUrl = new URL(parsedState.redirectTo);
-    redirectUrl.searchParams.set("vercel_connected", "1");
-    if (user.vercelConnection.teamId) {
-      redirectUrl.searchParams.set("vercel_team_id", user.vercelConnection.teamId);
-    }
-    return res.redirect(302, redirectUrl.toString());
-  }
-
-  return res.status(200).json(
-    new ApiResponse(
-      200,
-      {
-        connected: true,
-        teamId: user.vercelConnection.teamId,
-        scope: user.vercelConnection.scope
-      },
-      "Vercel connected successfully"
-    )
-  );
 });

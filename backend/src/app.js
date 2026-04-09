@@ -14,7 +14,7 @@ import aiRouter from "./routes/ai.routes.js";
 import resumeRouter from "./routes/resume.routes.js";
 import dashboardRouter from "./routes/dashboard.routes.js";
 import projectRouter from "./routes/project.routes.js";
-import oneClickPortfolioRouter from "./routes/portfolio.js";
+import portfolioRouter from "./routes/portfolio.routes.js";
 import adminRouter from "./routes/admin.routes.js";
 import { apiHitTracker } from "./middlewares/analytics.middleware.js";
 import { incrementDailyCounter } from "./models/analytics.models.js";
@@ -99,7 +99,7 @@ app.use(`${env.API_PREFIX}/resumes`, resumeRouter);
 app.use(`${env.API_PREFIX}/dashboard`, dashboardRouter);
 app.use(`${env.API_PREFIX}/projects`, projectRouter);
 app.use(`${env.API_PREFIX}/admin`, adminRouter);
-app.use("/portfolio", oneClickPortfolioRouter);
+app.use("/portfolio", portfolioRouter);
 
 app.use(notFoundHandler);
 app.use(globalErrorHandler);
