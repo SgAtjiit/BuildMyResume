@@ -10,12 +10,12 @@ import ThemeToggle from "@/components/ThemeToggle";
 // CONSTANTS & ANIMATIONS
 // ==========================================
 const features = [
-  { icon: FileText, title: "Smart Resume Parsing", desc: "Upload PDF/DOCX and we auto-parse skills, experience, education & projects." },
+  { icon: FileText, title: "Smart Resume Parsing", desc: "Upload PDF, DOCX, TXT, TEX, or image resumes and auto-extract profile-ready data." },
   { icon: Sparkles, title: "AI-Powered Tailoring", desc: "Paste a job description and get a perfectly matched resume in seconds." },
-  { icon: Layers, title: "Project Portfolio", desc: "Store and showcase your projects with rich details and media." },
-  { icon: Globe, title: "Subdomain Portfolios", desc: "Generate unique portfolio URLs under your domain for each application." },
-  { icon: Zap, title: "Multiple Templates", desc: "Choose from minimal, modern, and dev-focused resume & portfolio themes." },
-  { icon: Download, title: "Export Anywhere", desc: "Download tailored resumes as PDF/DOCX or share portfolio links instantly." },
+  { icon: Layers, title: "Project Portfolio", desc: "Add projects manually or import them from README files to keep your profile current." },
+  { icon: Globe, title: "Cloudflare Portfolio Deploy", desc: "Generate and publish your portfolio to Cloudflare Pages with optional custom domains." },
+  { icon: Zap, title: "GitHub Source Export", desc: "Export generated portfolio source code directly to GitHub when you need full control." },
+  { icon: Download, title: "Resume Export", desc: "Save tailored results as resumes and export polished resume previews as PDF." },
 ];
 
 const fadeUp = {
@@ -124,7 +124,7 @@ const Landing = () => {
           >
             <h2 className="text-3xl md:text-5xl font-bold mb-4 text-foreground tracking-tight">Everything you need to land it.</h2>
             <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-              From intelligent resume parsing to edge-deployed portfolios, all seamlessly integrated into one platform.
+              From intelligent resume parsing to Cloudflare Pages publishing, all seamlessly integrated into one platform.
             </p>
           </motion.div>
 
@@ -160,7 +160,7 @@ const Landing = () => {
             <div className="relative z-10 flex flex-col items-center">
               <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold mb-6 text-foreground tracking-tight">Ready to stand out?</h2>
               <p className="text-muted-foreground text-lg sm:text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
-                Join thousands of developers and professionals who tailor their resumes and deploy edge portfolios with AI.
+                Build from one master profile, tailor for each job with AI, and publish your portfolio in one focused workflow.
               </p>
               <Button variant="hero" size="lg" className="text-lg px-12 h-16 glow-strong hover:scale-105 active:scale-95 transition-all rounded-full" onClick={handleGetStarted} disabled={loading}>
                 Get Started for Free <ArrowRight className="ml-2 h-5 w-5" />
