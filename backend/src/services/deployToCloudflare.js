@@ -359,6 +359,20 @@ export const attachCustomDomain = async (projectName, customDomain, options = {}
       { headers }
     );
   } catch (error) {
+    const status = error?.response?.status;
+    const errText = JSON.stringify(error?.response?.data || "");
+    
+    // Cloudflare throws 409 Conflict if the domain is already attached
+    if (status === 409 || errText.includes("already exists") || error?.message?.includes("409")) {
+      logger.info("domain:attach-skipped", { projectName, customDomain, reason: "Already active" });
+      return {
+        domain: customDomain,
+        status: "active",
+        cnameTarget: `${projectName}.pages.dev`,
+        instructions: `Add CNAME: ${customDomain} -> ${projectName}.pages.dev`
+      };
+    }
+    
     logger.error("domain:attach-failed", formatAxiosError(error));
     throw error;
   }

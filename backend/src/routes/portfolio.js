@@ -6,9 +6,15 @@ import { publishPortfolio } from "../services/portfolioService.js";
 import { incrementDailyCounter } from "../models/analytics.models.js";
 
 const router = Router();
+const BUILD_JOB_TTL_MS = 5 * 60 * 1000;
 
-// In-Memory Job Queue (since it's a single Node instance, this is perfectly fine)
 const activeBuildJobs = new Map();
+
+const scheduleJobCleanup = (jobId) => {
+  setTimeout(() => {
+    activeBuildJobs.delete(jobId);
+  }, BUILD_JOB_TTL_MS);
+};
 
 const authMiddleware = (req, res, next) => {
   verifyFirebaseToken(req, res, (error) => {
@@ -25,6 +31,25 @@ const authMiddleware = (req, res, next) => {
   });
 };
 
+const buildFriendlyError = (error) => {
+  const rawDetails = error?.message || "Unknown error";
+  const stack = error?.stack || "";
+
+  if (rawDetails.toLowerCase().includes("cloudflare") || stack.includes("deployToCloudflare")) {
+    return "Deployment failed due to Cloudflare.";
+  }
+
+  if (rawDetails.toLowerCase().includes("vite") || stack.includes("buildViteProject")) {
+    return "Deployment failed due to backend build compilation.";
+  }
+
+  if (rawDetails.toLowerCase().includes("timeout") || rawDetails.includes("Abort")) {
+    return "Deployment failed because the backend timed out.";
+  }
+
+  return `Deployment failed: ${rawDetails}`;
+};
+
 router.post("/publish", authMiddleware, async (req, res) => {
   const traceId = randomUUID();
   const jobId = randomUUID();
@@ -37,7 +62,11 @@ router.post("/publish", authMiddleware, async (req, res) => {
     uid: req.user?.id
   });
 
-  activeBuildJobs.set(jobId, { status: "processing", progress: 0 });
+  activeBuildJobs.set(jobId, {
+    ownerId: req.user.id,
+    status: "processing",
+    progress: 0
+  });
 
   // Respond to frontend INSTANTLY to avoid 100s Load Balancer timeout.
   res.json({ success: true, jobId, traceId });
@@ -49,7 +78,7 @@ router.post("/publish", authMiddleware, async (req, res) => {
         traceId
       });
 
-      incrementDailyCounter("portfoliosPublished", 1);
+      await incrementDailyCounter("portfoliosPublished", 1);
 
       console.info("[portfolio/publish:success]", {
         traceId,
@@ -59,10 +88,14 @@ router.post("/publish", authMiddleware, async (req, res) => {
         durationMs: Date.now() - startedAt
       });
 
-      activeBuildJobs.set(jobId, { status: "completed", url, domainSetup: domainInfo });
-      
-      // Auto-cleanup memory after 5 minutes
-      setTimeout(() => activeBuildJobs.delete(jobId), 300000);
+      activeBuildJobs.set(jobId, {
+        ownerId: req.user.id,
+        status: "completed",
+        url,
+        customDomain: domainInfo?.domain || String(customDomain || "").trim(),
+        domainSetup: domainInfo
+      });
+      scheduleJobCleanup(jobId);
     } catch (error) {
       console.error("[portfolio/publish:error]", {
         traceId,
@@ -72,26 +105,12 @@ router.post("/publish", authMiddleware, async (req, res) => {
         durationMs: Date.now() - startedAt
       });
 
-      const rawDetails = error?.message || "Unknown error";
-      const stack = error?.stack || "";
-      
-      let friendlyError = "Deployment failed due to Backend server error.";
-      
-      if (rawDetails.toLowerCase().includes("cloudflare") || stack.includes("deployToCloudflare")) {
-        friendlyError = "Deployment failed due to Cloudflare.";
-      } else if (rawDetails.toLowerCase().includes("vite") || stack.includes("buildViteProject")) {
-        friendlyError = "Deployment failed due to Backend (Vite Compilation).";
-      } else if (rawDetails.toLowerCase().includes("timeout") || error?.message?.includes("Abort")) {
-        friendlyError = "Deployment failed due to Render Backend (Timeout).";
-      } else {
-        // Fallback to exact message if it's something specific we know
-        friendlyError = `Deployment failed: ${rawDetails}`;
-      }
-
-      activeBuildJobs.set(jobId, { status: "failed", error: friendlyError });
-      
-      // Auto-cleanup memory after 5 minutes
-      setTimeout(() => activeBuildJobs.delete(jobId), 300000);
+      activeBuildJobs.set(jobId, {
+        ownerId: req.user.id,
+        status: "failed",
+        error: buildFriendlyError(error)
+      });
+      scheduleJobCleanup(jobId);
     }
   })();
 });
@@ -100,11 +119,12 @@ router.get("/status/:jobId", authMiddleware, (req, res) => {
   const { jobId } = req.params;
   const job = activeBuildJobs.get(jobId);
   
-  if (!job) {
+  if (!job || job.ownerId !== req.user.id) {
     return res.status(404).json({ success: false, error: "Job ID not found or expired." });
   }
 
-  res.json({ success: true, ...job });
+  const { ownerId, ...publicJob } = job;
+  res.json({ success: true, ...publicJob });
 });
 
 router.post("/github", authMiddleware, exportPortfolioToGitHub);

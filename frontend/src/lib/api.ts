@@ -60,10 +60,10 @@ export async function apiRequest<T>(
         : undefined
     });
 
-    const payload = (await response.json()) as ApiEnvelope<T> | { message?: string };
+    const payload = (await response.json()) as ApiEnvelope<T> | { message?: string; error?: string };
 
     if (!response.ok) {
-      throw new Error(payload.message || "Request failed");
+      throw new Error(payload.message || payload.error || "Request failed");
     }
 
     return payload as ApiEnvelope<T>;

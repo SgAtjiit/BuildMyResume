@@ -1,15 +1,25 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { 
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, 
-  CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer 
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend,
+  ResponsiveContainer
 } from "recharts";
 import { ShieldAlert, Users, FolderCheck, Cpu, UploadCloud, ArrowLeft, Loader2 } from "lucide-react";
-import { api } from "@/lib/api";
-import { useAuth } from "@/contexts/auth-context";
+import { apiRequest } from "@/lib/api";
+import { useAuth } from "@/contexts/use-auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
+
+const ADMIN_EMAIL = "shrishpankajguptadbd6@gmail.com";
 
 interface DailyAnalytics {
   date: string;
@@ -22,45 +32,56 @@ interface DailyAnalytics {
 }
 
 export default function AdminAnalytics() {
-  const { user } = useAuth();
+  const { firebaseUser, backendUser, idToken, loading: authLoading } = useAuth();
   const [data, setData] = useState<DailyAnalytics[]>([]);
   const [loading, setLoading] = useState(true);
-
-  if (user?.email !== "shrishpankajguptadbd6@gmail.com") {
-    // Failsafe rendering block just in case routing rules are bypassed.
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh]">
-        <ShieldAlert className="h-16 w-16 text-destructive mb-4" />
-        <h2 className="text-2xl font-bold tracking-tight">Access Denied</h2>
-        <p className="text-muted-foreground mt-2">You do not have administrative privileges to view this area.</p>
-        <Link to="/dashboard" className="text-primary hover:underline mt-6">
-          Return to Dashboard
-        </Link>
-      </div>
-    );
-  }
+  const adminEmail = backendUser?.email || firebaseUser?.email || "";
+  const isAdmin = adminEmail === ADMIN_EMAIL;
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!isAdmin || !idToken) {
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
     const fetchAnalytics = async () => {
       try {
-        const response = await api.get("/admin/analytics");
-        setData(response.data.data || []);
-      } catch (error: any) {
-        toast.error("Failed to fetch analytics", {
-          description: error.response?.data?.error || "Unknown error occurred"
+        const response = await apiRequest<DailyAnalytics[]>("/admin/analytics", {
+          token: idToken
         });
+
+        if (!cancelled) {
+          setData(Array.isArray(response.data) ? response.data : []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          toast.error("Failed to fetch analytics", {
+            description: error instanceof Error ? error.message : "Unknown error occurred"
+          });
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
 
-    fetchAnalytics();
-  }, []);
+    void fetchAnalytics();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, idToken, isAdmin]);
 
   const { kpis, aggregatedApiHits } = useMemo(() => {
     if (!data.length) return { kpis: null, aggregatedApiHits: [] };
 
-    // Calculate sum of last 14 days
     const sum = data.reduce(
       (acc, curr) => {
         acc.newUsers += curr.newUsers || 0;
@@ -68,20 +89,17 @@ export default function AdminAnalytics() {
         acc.groqRequests += curr.groqRequests || 0;
         acc.resumesUploaded += curr.resumesUploaded || 0;
         acc.rateLimitHits += curr.rateLimitHits || 0;
-        
-        // Aggregate API Hits globally
+
         Object.entries(curr.apiHits || {}).forEach(([route, count]) => {
-          // Replace mongoose sanitary format back to normal slashes
-          const cleanRoute = (route || "").replace(/_/g, ".");
-          acc.apiHitMap[cleanRoute] = (acc.apiHitMap[cleanRoute] || 0) + (count as number);
+          const safeRoute = route || "Unknown endpoint";
+          acc.apiHitMap[safeRoute] = (acc.apiHitMap[safeRoute] || 0) + (count as number);
         });
-        
+
         return acc;
       },
       { newUsers: 0, portfoliosPublished: 0, groqRequests: 0, resumesUploaded: 0, rateLimitHits: 0, apiHitMap: {} as Record<string, number> }
     );
 
-    // Format Map for Bar Chart (Top 10 Endpoints)
     const topApiHits = Object.entries(sum.apiHitMap)
       .map(([route, hits]) => ({ route, hits }))
       .sort((a, b) => b.hits - a.hits)
@@ -90,10 +108,23 @@ export default function AdminAnalytics() {
     return { kpis: sum, aggregatedApiHits: topApiHits };
   }, [data]);
 
-  if (loading) {
+  if (authLoading || (loading && isAdmin)) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh]">
+        <ShieldAlert className="h-16 w-16 text-destructive mb-4" />
+        <h2 className="text-2xl font-bold tracking-tight">Access Denied</h2>
+        <p className="text-muted-foreground mt-2">You do not have administrative privileges to view this area.</p>
+        <Link to="/dashboard" className="text-primary hover:underline mt-6">
+          Return to Dashboard
+        </Link>
       </div>
     );
   }
@@ -108,8 +139,6 @@ export default function AdminAnalytics() {
 
   return (
     <div className="flex flex-col gap-8 pb-12 w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
-      
-      {/* Header */}
       <div className="flex items-center gap-4">
         <Link to="/dashboard" className="rounded-full p-2 hover:bg-muted transition-colors">
           <ArrowLeft className="h-5 w-5" />
@@ -120,9 +149,7 @@ export default function AdminAnalytics() {
         </div>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        
         <Card className="border-border/50 bg-card/40 backdrop-blur pb-2">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">New Users</CardTitle>
@@ -172,39 +199,35 @@ export default function AdminAnalytics() {
             <div className="text-2xl font-bold text-destructive">{kpis.rateLimitHits}</div>
           </CardContent>
         </Card>
-
       </div>
 
       <Separator className="my-2 opacity-50" />
 
-      {/* Main Charts area */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        
-        {/* Trend Line Chart */}
         <Card className="col-span-1 border-border/50 shadow-sm">
           <CardHeader>
             <CardTitle>14-Day Growth Trend</CardTitle>
-            <CardDescription>Visualizing AI and Conversion Growth over time.</CardDescription>
+            <CardDescription>Visualizing AI and conversion growth over time.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[350px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={data} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--muted-foreground)/0.2)" />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="hsl(var(--muted-foreground))" 
-                    fontSize={12} 
-                    tickLine={false} 
+                  <XAxis
+                    dataKey="date"
+                    stroke="hsl(var(--muted-foreground))"
+                    fontSize={12}
+                    tickLine={false}
                     axisLine={false}
-                    tickFormatter={(val) => val.split("-").slice(1).join("/")} // Transform YYYY-MM-DD -> MM/DD
+                    tickFormatter={(value) => String(value).split("-").slice(1).join("/")}
                   />
                   <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                  <RechartsTooltip 
-                    contentStyle={{ backgroundColor: 'hsl(var(--background))', borderColor: 'hsl(var(--border))', borderRadius: '8px' }}
-                    itemStyle={{ color: 'hsl(var(--foreground))' }}
+                  <RechartsTooltip
+                    contentStyle={{ backgroundColor: "hsl(var(--background))", borderColor: "hsl(var(--border))", borderRadius: "8px" }}
+                    itemStyle={{ color: "hsl(var(--foreground))" }}
                   />
-                  <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
+                  <Legend iconType="circle" wrapperStyle={{ paddingTop: "20px" }} />
                   <Line type="monotone" name="Portfolios" dataKey="portfoliosPublished" stroke="hsl(230, 80%, 65%)" strokeWidth={3} dot={false} />
                   <Line type="monotone" name="AI Generates" dataKey="groqRequests" stroke="hsl(200, 90%, 50%)" strokeWidth={2} dot={false} />
                   <Line type="monotone" name="New Users" dataKey="newUsers" stroke="hsl(150, 70%, 45%)" strokeWidth={2} dot={false} />
@@ -214,7 +237,6 @@ export default function AdminAnalytics() {
           </CardContent>
         </Card>
 
-        {/* API Routes Bar Chart */}
         <Card className="col-span-1 border-border/50 shadow-sm">
           <CardHeader>
             <CardTitle>Top API Endpoints</CardTitle>
@@ -226,18 +248,18 @@ export default function AdminAnalytics() {
                 <BarChart data={aggregatedApiHits} layout="vertical" margin={{ top: 0, right: 0, left: 10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--muted-foreground)/0.2)" />
                   <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis 
-                    type="category" 
-                    dataKey="route" 
-                    stroke="hsl(var(--foreground))" 
-                    fontSize={11} 
-                    tickLine={false} 
-                    axisLine={false} 
+                  <YAxis
+                    type="category"
+                    dataKey="route"
+                    stroke="hsl(var(--foreground))"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
                     width={140}
                   />
-                  <RechartsTooltip 
-                    cursor={{fill: 'transparent'}}
-                    contentStyle={{ backgroundColor: 'hsl(var(--background))', borderColor: 'hsl(var(--border))', borderRadius: '8px' }}
+                  <RechartsTooltip
+                    cursor={{ fill: "transparent" }}
+                    contentStyle={{ backgroundColor: "hsl(var(--background))", borderColor: "hsl(var(--border))", borderRadius: "8px" }}
                   />
                   <Bar dataKey="hits" name="Total Hits" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
                 </BarChart>
@@ -245,7 +267,6 @@ export default function AdminAnalytics() {
             </div>
           </CardContent>
         </Card>
-
       </div>
     </div>
   );

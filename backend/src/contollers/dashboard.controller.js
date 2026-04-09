@@ -12,6 +12,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 export const getDashboardSummary = asyncHandler(async (req, res) => {
   const user = await findUserByFirebaseUid(req.auth.uid);
 
+  const projectCount = await Project.countDocuments({ owner: user._id });
   const resumeCount = await Resume.countDocuments({ owner: user._id });
   const portfolioCount = await Portfolio.countDocuments({ userId: user._id });
 
@@ -50,6 +51,7 @@ export const getDashboardSummary = asyncHandler(async (req, res) => {
       200,
       {
         stats: {
+          projects: projectCount,
           resumes: resumeCount,
           tailoredVersions: resumeCount,
           portfolios: portfolioCount,

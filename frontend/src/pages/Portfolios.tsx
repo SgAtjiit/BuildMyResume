@@ -28,9 +28,13 @@ import { apiRequest, ensureExternalHttpsUrl, getBackendOrigin } from "@/lib/api"
 // ==========================================
 // TYPES
 // ==========================================
-type PublishResponse = { success: boolean; url?: string; error?: string; traceId?: string; details?: string; };
+type PublishResponse = { success: boolean; jobId?: string; url?: string; customDomain?: string; error?: string; traceId?: string; details?: string; };
+type PublishStatusResponse = PublishResponse & { status?: "processing" | "completed" | "failed" };
 type GitHubExportResponse = { success: boolean; repoUrl?: string; owner?: string; repoName?: string; branch?: string; pathPrefix?: string; filesUpdated?: number; createdRepo?: boolean; error?: string; details?: string; traceId?: string; };
 type DashboardSummary = {
+  stats?: {
+    projects?: number;
+  };
   activePortfolio: { url: string; customDomain: string; projectName: string; publishedAt: string | null } | null;
 };
 
@@ -52,6 +56,7 @@ const DEFAULT_GITHUB_EXPORT_FORM: GitHubExportForm = { token: "", repoOwner: "",
 // ==========================================
 const Portfolios = () => {
   const { idToken, backendUser } = useAuth();
+  const savedCustomDomain = (backendUser?.customDomain || "").trim();
   
   // State
   const [preference, setPreference] = useState<PublishPreference>(DEFAULT_PREFERENCE);
@@ -61,6 +66,7 @@ const Portfolios = () => {
   const [retryCount, setRetryCount] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [fakeProgress, setFakeProgress] = useState(0);
+  const [projectCount, setProjectCount] = useState(0);
   const [liveUrl, setLiveUrl] = useState("");
   const [activePortfolio, setActivePortfolio] = useState<DashboardSummary["activePortfolio"]>(null);
   
@@ -79,17 +85,23 @@ const Portfolios = () => {
   useEffect(() => {
     const loadSavedPortfolio = async () => {
       if (!idToken) {
+        setProjectCount(0);
+        setActivePortfolio(null);
+        setLiveUrl("");
         return;
       }
 
       try {
         const response = await apiRequest<DashboardSummary>("/dashboard/summary", { token: idToken });
         const savedPortfolio = response.data.activePortfolio;
+        setProjectCount(response.data.stats?.projects ?? 0);
 
         setActivePortfolio(savedPortfolio || null);
 
         if (savedPortfolio?.url) {
           setLiveUrl(ensureExternalHttpsUrl(savedPortfolio.url));
+        } else {
+          setLiveUrl("");
         }
       } catch {
         // Ignore background hydration errors; publish action still works.
@@ -100,55 +112,101 @@ const Portfolios = () => {
   }, [idToken]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (publishing && !publishError) {
-      const startTime = Date.now();
-      interval = setInterval(async () => {
-        setElapsedMs(Date.now() - startTime);
-        setFakeProgress((prev) => prev + (99 - prev) * 0.05); // Zeno's paradox
-        
-        // Poll backend if we have a Job ID
-        if (activeJobId && idToken) {
-          try {
-            const res = await fetch(`${getBackendOrigin()}/portfolio/status/${activeJobId}`, {
-              headers: { Authorization: `Bearer ${idToken}` }
-            });
-            if (res.ok) {
-              const data = await res.json();
-              if (data.status === "completed") {
-                setFakeProgress(100);
-                setTimeout(() => {
-                  setPublishing(false);
-                  setActiveJobId(null);
-                  if (data.url) {
-                    setLiveUrl(ensureExternalHttpsUrl(data.url) || "");
-                    setActivePortfolio((prev) => ({
-                      url: data.url,
-                      customDomain: prev?.customDomain || "",
-                      projectName: prev?.projectName || "Portfolio",
-                      publishedAt: new Date().toISOString()
-                    }));
-                  }
-                  toast.success("Portfolio published successfully");
-                }, 1000);
-              } else if (data.status === "failed") {
-                setPublishing(false);
-                setActiveJobId(null);
-                const errorLine = data.error || "Deployment failed to complete.";
-                setPublishError(errorLine);
-                toast.error(errorLine);
-              }
-            }
-          } catch (e) {
-            // Ignore polling errors to let it keep retrying
-          }
+    if (!publishing || publishError) {
+      return;
+    }
+
+    const startTime = Date.now();
+    let pollInFlight = false;
+    let settled = false;
+    let cancelled = false;
+
+    const pollJobStatus = async () => {
+      if (!activeJobId || !idToken || pollInFlight || settled || cancelled) {
+        return;
+      }
+
+      pollInFlight = true;
+
+      try {
+        const res = await fetch(`${getBackendOrigin()}/portfolio/status/${activeJobId}`, {
+          headers: { Authorization: `Bearer ${idToken}` }
+        });
+        const payload = (await res.json()) as PublishStatusResponse;
+
+        if (cancelled || settled) {
+          return;
         }
-      }, 3000);
-    } else if (!publishing && !publishError) {
+
+        if (res.status === 404) {
+          settled = true;
+          setPublishing(false);
+          setActiveJobId(null);
+          setPublishError("Deployment status expired or was lost. Please retry publishing.");
+          toast.error("Deployment status expired or was lost. Please retry publishing.");
+          return;
+        }
+
+        if (!res.ok) {
+          return;
+        }
+
+        if (payload.status === "completed") {
+          settled = true;
+          const savedUrl = ensureExternalHttpsUrl(payload.url || "");
+          const resolvedCustomDomain = payload.customDomain || savedCustomDomain;
+
+          setFakeProgress(100);
+          setRetryCount(0);
+          setPublishing(false);
+          setActiveJobId(null);
+
+          if (savedUrl) {
+            setLiveUrl(savedUrl);
+            setActivePortfolio((prev) => ({
+              url: savedUrl,
+              customDomain: resolvedCustomDomain,
+              projectName: prev?.projectName || "Portfolio",
+              publishedAt: new Date().toISOString()
+            }));
+          }
+
+          toast.success("Portfolio published successfully");
+          return;
+        }
+
+        if (payload.status === "failed") {
+          settled = true;
+          const errorLine = payload.error || "Deployment failed to complete.";
+          setPublishing(false);
+          setActiveJobId(null);
+          setPublishError(errorLine);
+          toast.error(errorLine);
+        }
+      } catch {
+        // Ignore transient polling errors and keep polling.
+      } finally {
+        pollInFlight = false;
+      }
+    };
+
+    const interval = setInterval(() => {
+      setElapsedMs(Date.now() - startTime);
+      setFakeProgress((prev) => Math.min(99, prev + (99 - prev) * 0.05));
+      void pollJobStatus();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [publishing, publishError, activeJobId, idToken, savedCustomDomain]);
+
+  useEffect(() => {
+    if (!publishing && !publishError) {
       setFakeProgress(100);
     }
-    return () => clearInterval(interval);
-  }, [publishing, publishError, activeJobId, idToken]);
+  }, [publishing, publishError]);
 
   const publishingStatus = useMemo(() => {
     if (publishError) {
@@ -170,11 +228,12 @@ const Portfolios = () => {
     if (!backendUser.displayName?.trim()) return false;
     if (!backendUser.email && !backendUser.displayName) return false;
     
-    const hasProjects = (backendUser.experience?.length ?? 0) > 0;
+    const hasProjects = projectCount > 0;
+    const hasExperience = (backendUser.experience?.length ?? 0) > 0;
     const hasEducation = (backendUser.education?.length ?? 0) > 0 || (backendUser.educationEntries?.length ?? 0) > 0;
     const hasSkills = (backendUser.skillLanguages?.length ?? 0) > 0 || (backendUser.skillFrameworks?.length ?? 0) > 0 || (backendUser.skillTools?.length ?? 0) > 0 || (backendUser.skillLibraries?.length ?? 0) > 0 || (backendUser.skillSections?.length ?? 0) > 0;
     
-    return hasProjects || hasEducation || hasSkills;
+    return hasProjects || hasExperience || hasEducation || hasSkills;
   };
 
   // Handlers
@@ -194,7 +253,7 @@ const Portfolios = () => {
     }
     
     // Check if user has at least one content section
-    const hasProjects = (backendUser.projects?.length ?? 0) > 0;
+    const hasProjects = projectCount > 0;
     const hasExp = (backendUser.experience?.length ?? 0) > 0;
     const hasEducation = (backendUser.education?.length ?? 0) > 0 || (backendUser.educationEntries?.length ?? 0) > 0;
     const hasSkills = (backendUser.skillLanguages?.length ?? 0) > 0 || (backendUser.skillFrameworks?.length ?? 0) > 0 || (backendUser.skillTools?.length ?? 0) > 0 || (backendUser.skillLibraries?.length ?? 0) > 0 || (backendUser.skillSections?.length ?? 0) > 0;
@@ -210,15 +269,16 @@ const Portfolios = () => {
       setElapsedMs(0);
       setLiveUrl("");
       setActiveJobId(null);
+      const customDomain = savedCustomDomain;
       
       const preferencePayload = { theme: preference.theme, font: preference.font, animations: preference.animations, accent: preference.accent, notes: preference.notes.trim() };
 
       const response = await fetch(publishEndpoint, {
         method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ preference: preferencePayload })
+        body: JSON.stringify({ preference: preferencePayload, customDomain })
       });
 
-      const payload = await response.json();
+      const payload = (await response.json()) as PublishResponse;
 
       if (!response.ok || (!payload.success && !payload.jobId)) {
         throw new Error(payload.details || payload.error || "Failed to start portfolio publishing");
@@ -236,7 +296,7 @@ const Portfolios = () => {
         setLiveUrl(savedUrl || "");
         setActivePortfolio({
           url: savedUrl || "",
-          customDomain: "",
+          customDomain,
           projectName: activePortfolio?.projectName || "Portfolio",
           publishedAt: new Date().toISOString()
         });
@@ -246,6 +306,7 @@ const Portfolios = () => {
       }
     } catch (error) {
       const errLine = error instanceof Error ? error.message : "Something went wrong sending the request.";
+      setActiveJobId(null);
       setPublishError(errLine);
       toast.error(errLine);
       setPublishing(false);
