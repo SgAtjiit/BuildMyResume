@@ -1457,15 +1457,7 @@ function ProjectStep({
               )}
             </Button>
           </div>
-          <Textarea
-            placeholder="AI se generate karein ya khud 2-4 lines me summary likhein."
-            className="min-h-[110px] resize-none"
-            value={profile.about}
-            onChange={(event) => setProfile((current) => ({ ...current, about: event.target.value }))}
-          />
-          <p className="text-xs text-muted-foreground">
-            Final step pe summary rakha gaya hai taaki onboarding start smooth rahe.
-          </p>
+          
         </div>
       </div>
     </div>
