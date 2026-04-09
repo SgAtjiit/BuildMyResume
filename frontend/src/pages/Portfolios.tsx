@@ -57,6 +57,7 @@ const Portfolios = () => {
   const [preference, setPreference] = useState<PublishPreference>(DEFAULT_PREFERENCE);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [fakeProgress, setFakeProgress] = useState(0);
@@ -102,15 +103,52 @@ const Portfolios = () => {
     let interval: NodeJS.Timeout;
     if (publishing && !publishError) {
       const startTime = Date.now();
-      interval = setInterval(() => {
+      interval = setInterval(async () => {
         setElapsedMs(Date.now() - startTime);
         setFakeProgress((prev) => prev + (99 - prev) * 0.05); // Zeno's paradox
-      }, 500);
+        
+        // Poll backend if we have a Job ID
+        if (activeJobId && idToken) {
+          try {
+            const res = await fetch(`${getBackendOrigin()}/portfolio/status/${activeJobId}`, {
+              headers: { Authorization: `Bearer ${idToken}` }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.status === "completed") {
+                setFakeProgress(100);
+                setTimeout(() => {
+                  setPublishing(false);
+                  setActiveJobId(null);
+                  if (data.url) {
+                    setLiveUrl(ensureExternalHttpsUrl(data.url) || "");
+                    setActivePortfolio((prev) => ({
+                      url: data.url,
+                      customDomain: prev?.customDomain || "",
+                      projectName: prev?.projectName || "Portfolio",
+                      publishedAt: new Date().toISOString()
+                    }));
+                  }
+                  toast.success("Portfolio published successfully");
+                }, 1000);
+              } else if (data.status === "failed") {
+                setPublishing(false);
+                setActiveJobId(null);
+                const errorLine = data.error || "Deployment failed to complete.";
+                setPublishError(errorLine);
+                toast.error(errorLine);
+              }
+            }
+          } catch (e) {
+            // Ignore polling errors to let it keep retrying
+          }
+        }
+      }, 3000);
     } else if (!publishing && !publishError) {
       setFakeProgress(100);
     }
     return () => clearInterval(interval);
-  }, [publishing, publishError]);
+  }, [publishing, publishError, activeJobId, idToken]);
 
   const publishingStatus = useMemo(() => {
     if (publishError) {
@@ -141,19 +179,28 @@ const Portfolios = () => {
 
   // Handlers
   const handlePublish = async () => {
-    // Validation checks
-    if (!idToken) return toast.error("Please sign in first");
+    // Validation checks with specific feedback
+    if (!idToken) return toast.error("Please sign in first to publish.");
     if (!backendUser) return toast.error("Profile data is loading. Please wait.");
-    if (!backendUser.email && !backendUser.displayName) return toast.error("Please update your profile with at least an email or name");
-    if (!backendUser.displayName?.trim()) return toast.error("Display name is required");
+
+    const nameStr = (backendUser.displayName || "").trim();
+    const emailStr = (backendUser.email || "").trim();
+
+    if (!nameStr && !emailStr) {
+      return toast.error("Validation Error: Please add your Name and Email in the Master Profile to proceed.");
+    }
+    if (!nameStr) {
+      return toast.error("Validation Error: Display Name is required in your Master Profile.");
+    }
     
-    // Check if user has some profile content
-    const hasProjects = (backendUser.experience?.length ?? 0) > 0;
+    // Check if user has at least one content section
+    const hasProjects = (backendUser.projects?.length ?? 0) > 0;
+    const hasExp = (backendUser.experience?.length ?? 0) > 0;
     const hasEducation = (backendUser.education?.length ?? 0) > 0 || (backendUser.educationEntries?.length ?? 0) > 0;
     const hasSkills = (backendUser.skillLanguages?.length ?? 0) > 0 || (backendUser.skillFrameworks?.length ?? 0) > 0 || (backendUser.skillTools?.length ?? 0) > 0 || (backendUser.skillLibraries?.length ?? 0) > 0 || (backendUser.skillSections?.length ?? 0) > 0;
     
-    if (!hasProjects && !hasEducation && !hasSkills) {
-      return toast.error("Add some content to your profile (experience, education, or skills) before publishing");
+    if (!hasProjects && !hasExp && !hasEducation && !hasSkills) {
+      return toast.error("Validation Error: Please fill at least one section (Projects, Experience, Education, or Skills) in your Master Profile before publishing.");
     }
 
     try {
@@ -162,43 +209,45 @@ const Portfolios = () => {
       setFakeProgress(0);
       setElapsedMs(0);
       setLiveUrl("");
+      setActiveJobId(null);
       
       const preferencePayload = { theme: preference.theme, font: preference.font, animations: preference.animations, accent: preference.accent, notes: preference.notes.trim() };
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s timeout
-
       const response = await fetch(publishEndpoint, {
         method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ preference: preferencePayload }),
-        signal: controller.signal
+        body: JSON.stringify({ preference: preferencePayload })
       });
-      clearTimeout(timeoutId);
 
-      const payload = (await response.json()) as PublishResponse;
+      const payload = await response.json();
 
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.details || payload.error || "Failed to publish portfolio");
+      if (!response.ok || (!payload.success && !payload.jobId)) {
+        throw new Error(payload.details || payload.error || "Failed to start portfolio publishing");
       }
 
-      const savedUrl = ensureExternalHttpsUrl(payload.url || "");
-
-      setLiveUrl(savedUrl || "");
-      setActivePortfolio({
-        url: savedUrl || "",
-        customDomain: "",
-        projectName: activePortfolio?.projectName || "Portfolio",
-        publishedAt: new Date().toISOString()
-      });
-      setRetryCount(0);
-      toast.success("Portfolio published successfully");
+      if (payload.jobId) {
+        // Switch into async polling mode
+        setActiveJobId(payload.jobId);
+        setRetryCount(0);
+        toast.success("Build queued. Polling for updates...");
+      } else if (payload.url) {
+        // Sync response fallback (if backend finishes instantly)
+        setFakeProgress(100);
+        const savedUrl = ensureExternalHttpsUrl(payload.url || "");
+        setLiveUrl(savedUrl || "");
+        setActivePortfolio({
+          url: savedUrl || "",
+          customDomain: "",
+          projectName: activePortfolio?.projectName || "Portfolio",
+          publishedAt: new Date().toISOString()
+        });
+        setRetryCount(0);
+        setPublishing(false);
+        toast.success("Portfolio published successfully");
+      }
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        setPublishError("Deployment timed out.");
-      } else {
-        setPublishError(error instanceof Error ? error.message : "Something went wrong during the build process.");
-      }
-    } finally {
+      const errLine = error instanceof Error ? error.message : "Something went wrong sending the request.";
+      setPublishError(errLine);
+      toast.error(errLine);
       setPublishing(false);
     }
   };

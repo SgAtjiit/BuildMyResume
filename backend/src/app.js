@@ -15,6 +15,9 @@ import resumeRouter from "./routes/resume.routes.js";
 import dashboardRouter from "./routes/dashboard.routes.js";
 import projectRouter from "./routes/project.routes.js";
 import oneClickPortfolioRouter from "./routes/portfolio.js";
+import adminRouter from "./routes/admin.routes.js";
+import { apiHitTracker } from "./middlewares/analytics.middleware.js";
+import { incrementDailyCounter } from "./models/analytics.models.js";
 
 const app = express();
 const normalizeOrigin = (value) => String(value || "").trim().replace(/\/+$/, "");
@@ -69,6 +72,8 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use(cookieParser());
 
+app.use(apiHitTracker);
+
 // Cron keep-alive — no auth, no rate-limit (placed before apiLimiter)
 app.get(env.API_PREFIX, (_req, res) => {
   res.status(200).json({ success: true, message: "Server is alive", timestamp: new Date().toISOString() });
@@ -78,7 +83,11 @@ const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    incrementDailyCounter("rateLimitHits", 1);
+    res.status(options.statusCode).send(options.message);
+  }
 });
 
 app.use(env.API_PREFIX, apiLimiter);
@@ -89,6 +98,7 @@ app.use(`${env.API_PREFIX}/ai`, aiRouter);
 app.use(`${env.API_PREFIX}/resumes`, resumeRouter);
 app.use(`${env.API_PREFIX}/dashboard`, dashboardRouter);
 app.use(`${env.API_PREFIX}/projects`, projectRouter);
+app.use(`${env.API_PREFIX}/admin`, adminRouter);
 app.use("/portfolio", oneClickPortfolioRouter);
 
 app.use(notFoundHandler);

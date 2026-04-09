@@ -194,7 +194,7 @@ const JakeResumePreview = ({ data, config }: { data: ResumeData; config?: Previe
     <div
       className="w-full max-w-[8.5in] mx-auto p-[0.5in] bg-white text-black shadow-xl"
       style={{
-        fontFamily: '"Noto Serif", "Times New Roman", serif',
+        fontFamily: '"Times New Roman", Times, serif',
         lineHeight: `${lineHeight}`,
         boxSizing: "border-box" // Ensures padding doesn't blow out the A4 width bounds
       }}

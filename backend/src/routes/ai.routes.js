@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
+import { incrementDailyCounter } from "../models/analytics.models.js";
 import {
 	analyzeJobDescriptionEndpoint,
 	generateDescriptionBullets,
@@ -19,7 +20,11 @@ const router = Router();
 const heavyAiLimiter = rateLimit({
 	windowMs: 15 * 60 * 1000,
 	max: 15,
-	message: { success: false, message: "Too many requests from this IP, please try again later." }
+	message: { success: false, message: "Too many requests from this IP, please try again later." },
+    handler: (req, res, next, options) => {
+        incrementDailyCounter("rateLimitHits", 1);
+        res.status(options.statusCode).json(options.message);
+    }
 });
 
 router.post("/tailor", verifyFirebaseToken, heavyAiLimiter, tailorResume);
@@ -40,6 +45,11 @@ router.post("/onboarding/parse-resume", verifyFirebaseToken, heavyAiLimiter, (re
 			return;
 		}
 
+		res.on("finish", () => {
+			if (res.statusCode >= 200 && res.statusCode < 300) {
+				incrementDailyCounter("resumesUploaded", 1);
+			}
+		});
 		parseResumeForOnboarding(req, res, next);
 	});
 });

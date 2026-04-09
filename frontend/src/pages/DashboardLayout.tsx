@@ -2,7 +2,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import DashboardSidebar from "@/components/DashboardSidebar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { FileText, LogOut } from "lucide-react";
+import { FileText, LogOut, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dashboardLinks } from "@/lib/dashboard-links";
 import { useAuth } from "@/contexts/use-auth";
@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 const DashboardLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { signOutUser } = useAuth();
+  const { backendUser, signOutUser } = useAuth();
 
   const handleSignOut = async () => {
     await signOutUser();
@@ -49,7 +49,7 @@ const DashboardLayout = () => {
           </div>
         </div>
         <nav className="px-3 pb-3 flex gap-2 overflow-x-auto no-scrollbar">
-          {dashboardLinks.map((link) => {
+          {[...dashboardLinks, ...(backendUser?.email === "shrishpankajguptadbd6@gmail.com" ? [{ to: "/dashboard/admin", icon: ShieldAlert, label: "Analytics" }] : [])].map((link) => {
             const isActive = location.pathname === link.to;
 
             return (

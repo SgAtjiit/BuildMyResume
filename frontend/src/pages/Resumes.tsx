@@ -92,37 +92,9 @@ const optimizeLayout = (data: ResumeData, options?: { forceExpanded?: boolean; s
   return { layout: "EXHAUSTIVE", maxProjectBullets: 4, skillFormat: "INLINE", fontScaling: 1, lineHeight: 1.2, sectionGap: 16 };
 };
 
-const pdfSerifFontFamily = "NotoSerif";
-let pdfFontLoadPromise: Promise<Record<string, string>> | null = null;
-
-const arrayBufferToBinaryString = (buffer: ArrayBuffer) => {
-  const bytes = new Uint8Array(buffer); let result = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) result += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return result;
-};
-
-const loadPdfSerifFontData = async () => {
-  if (!pdfFontLoadPromise) {
-    pdfFontLoadPromise = (async () => {
-      const responses = await Promise.all([ fetch("/fonts/NotoSerif-Regular.ttf"), fetch("/fonts/NotoSerif-Bold.ttf"), fetch("/fonts/NotoSerif-Italic.ttf"), fetch("/fonts/NotoSerif-BoldItalic.ttf") ]);
-      if (responses.some((r) => !r.ok)) throw new Error("Failed to load embedded serif font files");
-      const buffers = await Promise.all(responses.map((r) => r.arrayBuffer()));
-      return { regular: arrayBufferToBinaryString(buffers[0]), bold: arrayBufferToBinaryString(buffers[1]), italic: arrayBufferToBinaryString(buffers[2]), bolditalic: arrayBufferToBinaryString(buffers[3]) };
-    })();
-  }
-  return pdfFontLoadPromise;
-};
-
+const pdfSerifFontFamily = "times";
 const ensurePdfSerifFont = async (doc: jsPDF) => {
-  const fontList = doc.getFontList() as Record<string, string[]>;
-  if (fontList[pdfSerifFontFamily]) return;
-  const fontData = await loadPdfSerifFontData();
-  const jsPdfDoc = doc as jsPDF & {
-    addFileToVFS: (fileName: string, fileData: string) => void;
-    addFont: (fileName: string, fontName: string, fontStyle: string) => void;
-  };
-  jsPdfDoc.addFileToVFS("NotoSerif-Regular.ttf", fontData.regular); jsPdfDoc.addFileToVFS("NotoSerif-Bold.ttf", fontData.bold); jsPdfDoc.addFileToVFS("NotoSerif-Italic.ttf", fontData.italic); jsPdfDoc.addFileToVFS("NotoSerif-BoldItalic.ttf", fontData.bolditalic);
-  jsPdfDoc.addFont("NotoSerif-Regular.ttf", pdfSerifFontFamily, "normal"); jsPdfDoc.addFont("NotoSerif-Bold.ttf", pdfSerifFontFamily, "bold"); jsPdfDoc.addFont("NotoSerif-Italic.ttf", pdfSerifFontFamily, "italic"); jsPdfDoc.addFont("NotoSerif-BoldItalic.ttf", pdfSerifFontFamily, "bolditalic");
+  // jsPDF natively supports 'times' across all clients so we don't need TTFs
 };
 
 // ==========================================

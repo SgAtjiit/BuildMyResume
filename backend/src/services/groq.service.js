@@ -1,5 +1,6 @@
 import Groq from "groq-sdk";
 import { env } from "../config/env.js";
+import { incrementDailyCounter } from "../models/analytics.models.js";
 
 const groq = new Groq({ apiKey: env.GROQ_API_KEY });
 
@@ -29,6 +30,7 @@ export const generateTailoredResume = async ({
   ].join("\n\n");
 
   try {
+    incrementDailyCounter("groqRequests", 1);
     const completion = await groq.chat.completions.create({
       model: env.GROQ_MODEL,
       temperature: 0.4,
@@ -77,6 +79,7 @@ export const expandProjectBullet = async ({
   ].join("\n");
 
   try {
+    incrementDailyCounter("groqRequests", 1);
     const completion = await groq.chat.completions.create({
       model: env.GROQ_MODEL,
       temperature: 0.35,
@@ -121,6 +124,7 @@ export const generateProfileSummary = async ({
   ].join("\n\n");
 
   try {
+    incrementDailyCounter("groqRequests", 1);
     const completion = await groq.chat.completions.create({
       model: env.GROQ_MODEL,
       temperature: 0.35,
@@ -169,6 +173,7 @@ export const generateAtsDescriptionBullets = async ({
   ].join("\n");
 
   try {
+    incrementDailyCounter("groqRequests", 1);
     const completion = await groq.chat.completions.create({
       model: env.GROQ_MODEL,
       temperature: 0.35,

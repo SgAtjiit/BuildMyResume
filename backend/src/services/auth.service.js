@@ -1,4 +1,5 @@
 import { User } from "../models/user.models.js";
+import { incrementDailyCounter } from "../models/analytics.models.js";
 
 export const upsertUserFromFirebase = async (decodedToken) => {
   const firebaseUid = decodedToken.uid;
@@ -16,6 +17,7 @@ export const upsertUserFromFirebase = async (decodedToken) => {
       photoURL: nextPhoto,
       lastLoginAt: new Date()
     });
+    incrementDailyCounter("newUsers", 1);
     return user;
   }
 

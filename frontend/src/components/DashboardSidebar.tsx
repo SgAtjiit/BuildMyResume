@@ -1,6 +1,6 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { FileText, LogOut } from "lucide-react";
+import { FileText, LogOut, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/use-auth";
@@ -30,7 +30,7 @@ const DashboardSidebar = () => {
 
       {/* Navigation Links */}
       <nav className="flex-1 px-3 lg:px-4 py-6 space-y-1.5 overflow-y-auto custom-scrollbar">
-        {dashboardLinks.map((link) => {
+        {[...dashboardLinks, ...(backendUser?.email === "shrishpankajguptadbd6@gmail.com" ? [{ to: "/dashboard/admin", icon: ShieldAlert, label: "Analytics" }] : [])].map((link) => {
           const isActive = location.pathname === link.to;
           
           return (
