@@ -1,15 +1,22 @@
 import { Router } from "express";
 import multer from "multer";
+import rateLimit from "express-rate-limit";
 import { createResume, deleteResume, getResumeFile, listResumes } from "../contollers/resume.firebase.controller.js";
 import { verifyFirebaseToken } from "../middlewares/auth.middleware.js";
 import { resumeUpload } from "../middlewares/multer.middleware.js";
 
 const router = Router();
 
+const uploadLimiter = rateLimit({
+	windowMs: 15 * 60 * 1000,
+	max: 15,
+	message: { success: false, message: "Too many resume uploads from this IP, please try again later." }
+});
+
 router.use(verifyFirebaseToken);
 router.get("/", listResumes);
 router.get("/:resumeId/file", getResumeFile);
-router.post("/", (req, res, next) => {
+router.post("/", uploadLimiter, (req, res, next) => {
 	resumeUpload.single("resumeFile")(req, res, (error) => {
 		if (error) {
 			if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {

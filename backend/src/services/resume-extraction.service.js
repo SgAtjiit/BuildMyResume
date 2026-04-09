@@ -3,6 +3,7 @@ import path from "path";
 import { createRequire } from "module";
 import mammoth from "mammoth";
 import { createWorker } from "tesseract.js";
+import pLimit from "p-limit";
 import {
   downloadResumeFromFirebaseStorage,
   resolveFirebaseResumeStorageLocation
@@ -10,6 +11,8 @@ import {
 
 const require = createRequire(import.meta.url);
 const { PDFParse } = require("pdf-parse");
+
+const extractionLimit = pLimit(1);
 
 const urlRegex = /https?:\/\/[^\s)]+/gi;
 const headingRegex = /^(?:#+\s*)?(skills?|technical skills?|projects?|achievements?(?:\s*&\s*profiles?)?|profiles?|experience|work experience|professional experience|education|academic(?:\s+background)?|professional summary|summary)\s*:?$/i;
@@ -24,7 +27,7 @@ const mask = {
 const readTextFile = async (filePath) => fs.readFile(filePath, "utf8");
 const readTextBuffer = async (buffer) => buffer.toString("utf8");
 
-const readPdfBuffer = async (buffer) => {
+const readPdfBuffer = async (buffer) => extractionLimit(async () => {
   const parser = new PDFParse({ data: buffer });
 
   try {
@@ -33,24 +36,30 @@ const readPdfBuffer = async (buffer) => {
   } finally {
     await parser.destroy();
   }
-};
+});
 
-const readPdfText = async (filePath) => {
+const readPdfText = async (filePath) => extractionLimit(async () => {
   const buffer = await fs.readFile(filePath);
-  return readPdfBuffer(buffer);
-};
+  const parser = new PDFParse({ data: buffer });
+  try {
+    const parsed = await parser.getText();
+    return parsed.text || "";
+  } finally {
+    await parser.destroy();
+  }
+});
 
-const readDocxBuffer = async (buffer) => {
+const readDocxBuffer = async (buffer) => extractionLimit(async () => {
   const result = await mammoth.extractRawText({ buffer });
   return result.value || "";
-};
+});
 
-const readDocxText = async (filePath) => {
+const readDocxText = async (filePath) => extractionLimit(async () => {
   const result = await mammoth.extractRawText({ path: filePath });
   return result.value || "";
-};
+});
 
-const readImageBuffer = async (buffer) => {
+const readImageBuffer = async (buffer) => extractionLimit(async () => {
   const worker = await createWorker("eng");
   try {
     const result = await worker.recognize(buffer);
@@ -58,9 +67,9 @@ const readImageBuffer = async (buffer) => {
   } finally {
     await worker.terminate();
   }
-};
+});
 
-const readPdfAnnotationUrlsBuffer = async (buffer) => {
+const readPdfAnnotationUrlsBuffer = async (buffer) => extractionLimit(async () => {
   try {
     const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const loadingTask = pdfjsLib.getDocument({
@@ -98,9 +107,9 @@ const readPdfAnnotationUrlsBuffer = async (buffer) => {
   } catch {
     return [];
   }
-};
+});
 
-const readImageText = async (filePath) => {
+const readImageText = async (filePath) => extractionLimit(async () => {
   const worker = await createWorker("eng");
   try {
     const result = await worker.recognize(filePath);
@@ -108,7 +117,7 @@ const readImageText = async (filePath) => {
   } finally {
     await worker.terminate();
   }
-};
+});
 
 const readTextFromBufferByExtension = async (buffer, extension) => {
   if (extension === ".txt" || extension === ".tex") {

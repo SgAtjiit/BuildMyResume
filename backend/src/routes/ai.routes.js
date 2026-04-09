@@ -1,5 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
+import rateLimit from "express-rate-limit";
 import {
 	analyzeJobDescriptionEndpoint,
 	generateDescriptionBullets,
@@ -15,11 +16,17 @@ import { resumeUpload } from "../middlewares/multer.middleware.js";
 
 const router = Router();
 
-router.post("/tailor", verifyFirebaseToken, tailorResume);
+const heavyAiLimiter = rateLimit({
+	windowMs: 15 * 60 * 1000,
+	max: 15,
+	message: { success: false, message: "Too many requests from this IP, please try again later." }
+});
+
+router.post("/tailor", verifyFirebaseToken, heavyAiLimiter, tailorResume);
 router.post("/project-bullet/extend", verifyFirebaseToken, extendProjectBullet);
 router.post("/profile-summary", verifyFirebaseToken, generateUserProfileSummary);
 router.post("/description-bullets", verifyFirebaseToken, generateDescriptionBullets);
-router.post("/onboarding/parse-resume", verifyFirebaseToken, (req, res, next) => {
+router.post("/onboarding/parse-resume", verifyFirebaseToken, heavyAiLimiter, (req, res, next) => {
 	resumeUpload.single("resumeFile")(req, res, (error) => {
 		if (error) {
 			if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
@@ -38,8 +45,8 @@ router.post("/onboarding/parse-resume", verifyFirebaseToken, (req, res, next) =>
 });
 
 // Two-stage prompting endpoints (NEW)
-router.post("/analyze-jd", verifyFirebaseToken, analyzeJobDescriptionEndpoint);
+router.post("/analyze-jd", verifyFirebaseToken, heavyAiLimiter, analyzeJobDescriptionEndpoint);
 router.post("/match-master-data", verifyFirebaseToken, matchMasterDataForJd);
-router.post("/tailor-two-stage", verifyFirebaseToken, tailorResumeWithTwoStage);
+router.post("/tailor-two-stage", verifyFirebaseToken, heavyAiLimiter, tailorResumeWithTwoStage);
 
 export default router;
